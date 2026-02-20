@@ -120,6 +120,55 @@ async function migrate() {
     `;
     console.log('✅ Index on devices ready');
 
+    // ─── TABLE 4: restore_requests ────────────────────────────────────────────
+    // Phase 3: PWA sends a restore request targeting a specific device.
+    // The extension polls for pending requests and opens the tabs locally.
+    //
+    // HOW IT WORKS:
+    // 1. User taps "Restore to Desktop" on PWA (targets device X)
+    // 2. PWA posts to /restore with the snapshot_id and target device_id
+    // 3. Backend stores the request with status "pending"
+    // 4. Extension polls GET /restore/pending every 5 seconds
+    // 5. Extension finds the request, decrypts the snapshot, opens tabs
+    // 6. Extension marks the request "completed"
+    // 7. PWA polls GET /restore/:id and shows "Session restored!" when completed
+    //
+    // WHY NOT WEBSOCKETS?
+    // Service workers can't hold WebSocket connections.
+    // Short polling (5s) is simple, reliable, and sufficient for this use case.
+    await sql`
+      CREATE TABLE IF NOT EXISTS restore_requests (
+        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+        -- Which device should restore the session
+        target_device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+
+        -- Which snapshot to restore (null = latest for that device)
+        snapshot_id UUID REFERENCES snapshots(id) ON DELETE SET NULL,
+
+        -- Status lifecycle: pending → completed | failed | expired
+        status      TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'completed', 'failed', 'expired')),
+
+        -- Set by the extension after attempting restore
+        error_msg   TEXT,
+
+        created_at  TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+        updated_at  TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+
+        -- Auto-expire requests after 5 minutes (extension may be offline)
+        expires_at  TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '5 minutes') NOT NULL
+      );
+    `;
+    console.log('✅ Table "restore_requests" ready');
+
+    await sql`
+      CREATE INDEX IF NOT EXISTS idx_restore_device_status
+        ON restore_requests(target_device_id, status, expires_at);
+    `;
+    console.log('✅ Index on restore_requests ready');
+
     console.log('\n🎉 All migrations complete! Your database is ready.');
     console.log('\nNext step: npm run dev\n');
 
