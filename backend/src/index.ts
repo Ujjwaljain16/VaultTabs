@@ -1,8 +1,11 @@
 /**
  * src/index.ts
  *
- * HTTPS-enabled VaultTabs backend using mkcert.
- * Runs securely over LAN for mobile testing.
+ * Unified HTTPS-enabled VaultTabs backend.
+ * - Uses mkcert certificates
+ * - Works over LAN (0.0.0.0)
+ * - Includes all routes
+ * - Clean startup banner
  */
 
 import Fastify from 'fastify';
@@ -16,6 +19,7 @@ import 'dotenv/config';
 import { authRoutes } from './routes/auth.js';
 import { deviceRoutes } from './routes/devices.js';
 import { snapshotRoutes } from './routes/snapshots.js';
+import { restoreRoutes } from './routes/restore.js';
 
 // ─────────────────────────────────────────────────────────────
 // ESM __dirname Fix
@@ -24,10 +28,24 @@ import { snapshotRoutes } from './routes/snapshots.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Cert path (../../certs from backend/src)
+// ─────────────────────────────────────────────────────────────
+// CERTIFICATE CONFIG (mkcert)
+// ─────────────────────────────────────────────────────────────
+
 const certDir = path.resolve(__dirname, '../../certs');
-const keyPath = path.join(certDir, '100.129.162.183+2-key.pem');
-const certPath = path.join(certDir, '100.129.162.183+2.pem');
+
+// Dynamically find mkcert files
+const files = fs.readdirSync(certDir).sort(); // Sort to be deterministic
+const hostIp = process.env.PUBLIC_IP || '';
+
+// Try to find certs matching the current IP first, then fallback to any pem
+const keyFile = files.find(f => f.includes('key.pem') && (hostIp && f.startsWith(hostIp))) ||
+  files.find(f => f.includes('key.pem')) || 'key.pem';
+const certFile = files.find(f => f.includes('.pem') && !f.includes('key.pem') && (hostIp && f.startsWith(hostIp))) ||
+  files.find(f => f.includes('.pem') && !f.includes('key.pem')) || 'cert.pem';
+
+const keyPath = path.join(certDir, keyFile);
+const certPath = path.join(certDir, certFile);
 
 // ─────────────────────────────────────────────────────────────
 // ENVIRONMENT CHECKS
@@ -40,6 +58,12 @@ if (!process.env.JWT_SECRET) {
 
 if (!process.env.DATABASE_URL) {
   console.error('\n❌ DATABASE_URL is not set in your .env file.');
+  process.exit(1);
+}
+
+if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+  console.error('\n❌ HTTPS certificates not found.');
+  console.error(`Expected certs in: ${certDir}`);
   process.exit(1);
 }
 
@@ -67,9 +91,13 @@ async function buildServer() {
   // ── CORS ───────────────────────────────────────────────────
 
   await server.register(cors, {
-    origin: process.env.NODE_ENV === 'production'
-      ? (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean)
-      : true,
+    origin:
+      process.env.NODE_ENV === 'production'
+        ? (process.env.ALLOWED_ORIGINS || '')
+          .split(',')
+          .map(o => o.trim())
+          .filter(Boolean)
+        : true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
@@ -86,8 +114,9 @@ async function buildServer() {
   await server.register(authRoutes, { prefix: '/api/v1' });
   await server.register(deviceRoutes, { prefix: '/api/v1' });
   await server.register(snapshotRoutes, { prefix: '/api/v1' });
+  await server.register(restoreRoutes, { prefix: '/api/v1' });
 
-  // ── HEALTH ─────────────────────────────────────────────────
+  // ── HEALTH CHECK ───────────────────────────────────────────
 
   server.get('/health', async () => ({
     status: 'ok',
@@ -95,18 +124,19 @@ async function buildServer() {
     version: '0.1.0',
   }));
 
-  // ── ERROR HANDLER ──────────────────────────────────────────
+  // ── GLOBAL ERROR HANDLER ───────────────────────────────────
 
   server.setErrorHandler(async (error, _request, reply) => {
     console.error('[VaultTabs] Unhandled error:', error);
 
     const statusCode = error.statusCode || 500;
     return reply.status(statusCode).send({
-      error: statusCode === 500 ? 'Internal server error' : error.message,
+      error:
+        statusCode === 500 ? 'Internal server error' : error.message,
       message:
         process.env.NODE_ENV === 'development'
           ? error.message
-          : 'Something went wrong.',
+          : 'Something went wrong. Check server logs.',
     });
   });
 
@@ -116,6 +146,7 @@ async function buildServer() {
     return reply.status(404).send({
       error: 'Not found',
       message: `Route ${request.method} ${request.url} does not exist`,
+      hint: 'Check API documentation.',
     });
   });
 
@@ -123,22 +154,37 @@ async function buildServer() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// START
+// START SERVER
 // ─────────────────────────────────────────────────────────────
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
+const HOST = '0.0.0.0';
 
 try {
   const server = await buildServer();
-  await server.listen({ port: PORT, host: '0.0.0.0' });
+  await server.listen({ port: PORT, host: HOST });
 
-  console.log('\n╔════════════════════════════════════════╗');
-  console.log('║   🔒 VaultTabs Backend (HTTPS) Running ║');
-  console.log('╠════════════════════════════════════════╣');
-  console.log(`║   https://100.129.162.183:${PORT}        ║`);
-  console.log(`║   https://100.129.162.183:${PORT}/health ║`);
-  console.log('╚════════════════════════════════════════╝\n');
+  console.log('\n╔══════════════════════════════════════════╗');
+  console.log('║   🔒 VaultTabs Backend (HTTPS) Running  ║');
+  console.log('╠══════════════════════════════════════════╣');
+  const displayHost = process.env.PUBLIC_IP || 'localhost';
+  console.log(`║   https://${displayHost}:${PORT}          ║`);
+  console.log(`║   https://${displayHost}:${PORT}/health   ║`);
+  console.log('╠══════════════════════════════════════════╣');
+  console.log('║   Routes:                                ║');
+  console.log('║   POST /api/v1/auth/register             ║');
+  console.log('║   POST /api/v1/auth/login                ║');
+  console.log('║   GET  /api/v1/auth/me                   ║');
+  console.log('║   POST /api/v1/devices/register          ║');
+  console.log('║   POST /api/v1/snapshots                 ║');
+  console.log('║   POST /api/v1/restore                   ║');
+  console.log('╚══════════════════════════════════════════╝\n');
 } catch (err) {
   console.error('\n❌ Failed to start server:', err);
+  console.error('\nCommon causes:');
+  console.error('  - Port already in use → change PORT in .env');
+  console.error('  - Missing .env file');
+  console.error('  - Database not running');
+  console.error('  - mkcert certificates missing');
   process.exit(1);
 }
