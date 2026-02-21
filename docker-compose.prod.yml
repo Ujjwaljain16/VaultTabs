@@ -1,0 +1,47 @@
+# docker-compose.prod.yml
+#
+# Production overrides. Use with:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Changes from dev:
+#   - No source volume mounts (use built image only)
+#   - Stricter resource limits
+#   - No postgres port exposed externally (only internal network)
+#   - Restart always (not unless-stopped)
+
+version: '3.9'
+
+services:
+
+  postgres:
+    restart: always
+    ports: []  # Remove external port — only accessible within Docker network
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in production}
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+  backend:
+    restart: always
+    environment:
+      NODE_ENV: production
+    volumes: []  # No source mount in production
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+
+  pwa:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+
+  cleanup:
+    restart: always
