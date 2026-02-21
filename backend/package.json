@@ -1,27 +1,33 @@
 {
   "name": "vaulttabs-backend",
   "version": "0.1.0",
-  "description": "VaultTabs backend API server",
   "type": "module",
-  "main": "dist/index.js",
+  "description": "VaultTabs backend API server",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "db:migrate": "tsx src/db/migrate.ts"
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:cleanup": "tsx src/db/cleanup.ts"
   },
   "dependencies": {
-    "fastify": "^4.26.0",
     "@fastify/cors": "^9.0.1",
+    "@fastify/helmet": "^11.1.1",
     "@fastify/jwt": "^8.0.1",
-    "postgres": "^3.4.3",
+    "@fastify/rate-limit": "^9.1.0",
+    "@vaulttabs/shared": "*",
+    "axios": "^1.13.5",
     "dotenv": "^16.4.5",
-    "zod": "^3.22.4",
-    "pino-pretty": "^11.0.0"
+    "fastify": "^4.26.0",
+    "pino-pretty": "^11.0.0",
+    "postgres": "^3.4.3",
+    "uuid": "^13.0.0",
+    "zod": "^3.22.4"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
+    "@types/node": "^20.11.0",
+    "@types/uuid": "^10.0.0",
     "tsx": "^4.7.0",
-    "@types/node": "^20.11.0"
+    "typescript": "^5.4.0"
   }
 }

@@ -1,0 +1,10 @@
+{
+    "name": "vaulttabs-workspace",
+    "private": true,
+    "workspaces": [
+        "backend",
+        "extension",
+        "pwa",
+        "shared"
+    ]
+}

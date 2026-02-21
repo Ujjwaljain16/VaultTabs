@@ -1,0 +1,55 @@
+# backend/Dockerfile
+#
+# Multi-stage build:
+#   Stage 1 (builder) — installs all deps, compiles TypeScript
+#   Stage 2 (runner)  — copies only the compiled output + prod deps
+#
+# Result: ~120MB image instead of ~500MB with all devDeps
+
+# ── Stage 1: Build ────────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+
+WORKDIR /build
+
+# Copy package files first (better layer caching)
+COPY package.json package-lock.json* ./
+
+# Install ALL dependencies (including devDeps for TypeScript)
+RUN npm ci --ignore-scripts
+
+# Copy source
+COPY tsconfig.json ./
+COPY src ./src
+
+# Compile TypeScript → dist/
+RUN npx tsc --project tsconfig.json
+
+# ── Stage 2: Production runner ────────────────────────────────────────────────
+FROM node:20-alpine AS runner
+
+# Security: run as non-root user
+RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json package-lock.json* ./
+
+# Install ONLY production dependencies
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+
+# Copy compiled output from builder
+COPY --from=builder /build/dist ./dist
+
+# Switch to non-root
+USER nodejs
+
+# Expose port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=3 \
+  CMD wget -qO- http://localhost:3000/health || exit 1
+
+# Start the compiled server
+CMD ["node", "dist/index.js"]
