@@ -111,9 +111,30 @@ async function buildServer() {
 
   // ── CORS ───────────────────────────────────────────────────
   await server.register(cors, {
-    origin: process.env.NODE_ENV === 'production'
-      ? (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean)
-      : true,
+    origin: (origin, cb) => {
+      // Allow local development (no origin) or non-production automatically
+      if (!origin || process.env.NODE_ENV !== 'production') {
+        cb(null, true);
+        return;
+      }
+
+      const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean);
+
+      // Check for exact match or wildcard match
+      const isAllowed = allowedOrigins.some(allowed => {
+        if (allowed.includes('*')) {
+          const regex = new RegExp('^' + allowed.replace(/\*/g, '.*') + '$');
+          return regex.test(origin);
+        }
+        return allowed === origin;
+      });
+
+      if (isAllowed) {
+        cb(null, true);
+      } else {
+        cb(new Error('Not allowed by CORS'), false);
+      }
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
