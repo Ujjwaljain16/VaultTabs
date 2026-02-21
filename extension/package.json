@@ -9,7 +9,7 @@
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
-    "postinstall": "wxt prepare"
+    "postinstall": "wxt prepare || true"
   },
   "dependencies": {
     "idb": "^8.0.0",
