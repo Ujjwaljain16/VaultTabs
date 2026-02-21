@@ -10,6 +10,7 @@ node_modules/
 dist/
 .output/
 .wxt/
+.next/
 
 # TypeScript build info
 *.tsbuildinfo

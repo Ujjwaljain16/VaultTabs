@@ -1,0 +1,121 @@
+/* ═══════════════════════════════════════════════════════════
+   VaultTabs PWA — Global Styles
+   Aesthetic: Terminal-vault. Monospace. Phosphor green on deep black.
+   Feels like a secure ops dashboard. Dense, precise, trustworthy.
+   ═══════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Core palette */
+  --black:        #080808;
+  --black-2:      #0f0f0f;
+  --black-3:      #161616;
+  --black-4:      #1e1e1e;
+  --black-5:      #242424;
+
+  /* Phosphor green — the signature color */
+  --green:        #39ff85;
+  --green-dim:    #22c55e;
+  --green-muted:  rgba(57, 255, 133, 0.12);
+  --green-border: rgba(57, 255, 133, 0.18);
+  --green-glow:   0 0 20px rgba(57, 255, 133, 0.15);
+
+  /* Text */
+  --text:         #e2e8e4;
+  --text-2:       #9aab9e;
+  --text-3:       #566059;
+
+  /* Semantic */
+  --error:        #ff5e5e;
+  --error-dim:    rgba(255, 94, 94, 0.1);
+  --warn:         #ffb347;
+
+  /* Borders */
+  --border:       #1e2420;
+  --border-2:     #252e28;
+
+  /* Radius */
+  --r:            10px;
+  --r-sm:         6px;
+  --r-lg:         16px;
+
+  /* Fonts */
+  --font-mono:    'JetBrains Mono', 'Courier New', monospace;
+  --font-sans:    'DM Sans', system-ui, sans-serif;
+}
+
+html {
+  background: var(--black);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Prevent iOS bounce scroll */
+  overflow: hidden;
+  height: 100%;
+}
+
+body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--black);
+}
+
+#__next {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── SCROLLBARS ─────────────────────────────────── */
+::-webkit-scrollbar { width: 3px; height: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--black-5); border-radius: 2px; }
+
+/* ── SELECTION ──────────────────────────────────── */
+::selection { background: var(--green-muted); color: var(--green); }
+
+/* ── FOCUS ──────────────────────────────────────── */
+:focus-visible { outline: 1px solid var(--green); outline-offset: 2px; }
+
+/* ── TYPOGRAPHY UTILITIES ───────────────────────── */
+.mono  { font-family: var(--font-mono); }
+.sans  { font-family: var(--font-sans); }
+.green { color: var(--green); }
+.muted { color: var(--text-2); }
+.dim   { color: var(--text-3); }
+
+/* ── ANIMATIONS ─────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-green {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+@keyframes scan {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+.fade-in { animation: fadeIn 0.3s ease forwards; }
+
+/* Staggered children */
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 60ms; }
+.stagger > *:nth-child(3) { animation-delay: 120ms; }
+.stagger > *:nth-child(4) { animation-delay: 180ms; }
+.stagger > *:nth-child(5) { animation-delay: 240ms; }
+.stagger > *:nth-child(n+6) { animation-delay: 300ms; }

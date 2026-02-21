@@ -1,0 +1,204 @@
+/* Account recovery page — same terminal vault aesthetic */
+
+.root {
+  min-height: 100dvh;
+  background: var(--black);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 20px;
+}
+
+.card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: fadeIn 0.3s ease forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Logo ─────────────────────────────────────────── */
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logoName {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ── Description ──────────────────────────────────── */
+.desc {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.55;
+  font-family: var(--font-mono);
+}
+
+/* ── Error ────────────────────────────────────────── */
+.error {
+  background: var(--error-dim);
+  border: 1px solid rgba(255,94,94,0.2);
+  color: var(--error);
+  border-radius: var(--r-sm);
+  padding: 9px 12px;
+  font-size: 12px;
+  display: flex; align-items: flex-start; gap: 8px;
+  line-height: 1.4;
+}
+
+.errorIcon { font-size: 10px; margin-top: 2px; flex-shrink: 0; }
+
+/* ── Form ─────────────────────────────────────────── */
+.form { display: flex; flex-direction: column; gap: 12px; }
+
+.field { display: flex; flex-direction: column; gap: 4px; }
+
+.label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-3);
+  letter-spacing: 0.12em;
+}
+
+.input {
+  background: var(--black-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 10px 12px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.input::placeholder { color: var(--text-3); }
+
+.input:focus {
+  border-color: var(--green-border);
+  box-shadow: 0 0 0 3px rgba(57,255,133,0.06);
+}
+
+.codeInput {
+  letter-spacing: 0.06em;
+  font-size: 12.5px;
+}
+
+.fieldHint {
+  font-size: 10px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  margin-top: 1px;
+}
+
+.divider {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-3);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0;
+}
+
+.divider::before, .divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── Button ───────────────────────────────────────── */
+.btn {
+  background: var(--green);
+  color: #050f08;
+  border: none;
+  border-radius: var(--r-sm);
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: opacity 0.15s, box-shadow 0.2s;
+}
+
+.btn:hover { opacity: 0.9; box-shadow: var(--green-glow); }
+.btn:active { transform: scale(0.98); }
+
+.backLink {
+  background: none; border: none;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  text-align: center;
+  padding: 4px;
+  transition: color 0.15s;
+}
+
+.backLink:hover { color: var(--text-2); }
+
+/* ── Progress screen ──────────────────────────────── */
+.spinner {
+  width: 32px; height: 32px;
+  border: 2px solid var(--border-2);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin: 0 auto;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.title {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  text-align: center;
+}
+
+.phaseLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--green-dim);
+  text-align: center;
+  line-height: 1.5;
+}
+
+.zkNote {
+  font-size: 10.5px;
+  color: var(--text-3);
+  text-align: center;
+  font-family: var(--font-mono);
+  line-height: 1.5;
+}
+
+/* ── Success screen ───────────────────────────────── */
+.successIcon {
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  background: var(--green-muted);
+  border: 1px solid var(--green-border);
+  color: var(--green);
+  font-size: 22px;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto;
+}
