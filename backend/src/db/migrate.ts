@@ -25,7 +25,7 @@
  * We use "CREATE TABLE IF NOT EXISTS" so it won't crash if tables already exist.
  */
 
-import sql from './client';
+import sql from './client.js';
 
 async function migrate() {
   console.log('🔧 Running database migrations...\n');
@@ -58,11 +58,33 @@ async function migrate() {
         -- Not secret — just prevents rainbow table attacks.
         salt                TEXT NOT NULL,
 
+        -- ── Recovery key (Phase 4) ────────────────────────────────────────────
+        -- A second copy of the master key encrypted with a recovery code.
+        -- Shown ONCE at registration. Never stored in plaintext.
+        -- If user forgets password, recovery code → decrypt → re-encrypt with new password.
+        recovery_encrypted_master_key TEXT,
+        recovery_key_iv               TEXT,
+        recovery_key_salt             TEXT,
+        recovery_key_hash             TEXT,  -- scrypt hash of recovery code for verification
+
+        -- How many snapshots to retain per device (default 50, user can change)
+        snapshot_retention  INTEGER NOT NULL DEFAULT 50,
+
         created_at          TIMESTAMPTZ DEFAULT NOW() NOT NULL,
         updated_at          TIMESTAMPTZ DEFAULT NOW() NOT NULL
       );
     `;
     console.log('✅ Table "users" ready');
+
+    // Ensure snapshot_retention and recovery columns exist for older tables
+    await sql`
+      ALTER TABLE users 
+        ADD COLUMN IF NOT EXISTS snapshot_retention INTEGER NOT NULL DEFAULT 50,
+        ADD COLUMN IF NOT EXISTS recovery_encrypted_master_key TEXT,
+        ADD COLUMN IF NOT EXISTS recovery_key_iv TEXT,
+        ADD COLUMN IF NOT EXISTS recovery_key_salt TEXT,
+        ADD COLUMN IF NOT EXISTS recovery_key_hash TEXT;
+    `;
 
     // ─── TABLE 2: devices ─────────────────────────────────────────────────────
     await sql`
@@ -120,6 +142,17 @@ async function migrate() {
     `;
     console.log('✅ Index on devices ready');
 
+    // ─── EXTRA PERFORMANCE INDEXES ──────────────────────────────────────────
+    await sql`
+      CREATE INDEX IF NOT EXISTS idx_snapshots_device_captured
+        ON snapshots(device_id, captured_at DESC);
+    `;
+    await sql`
+      CREATE INDEX IF NOT EXISTS idx_snapshots_user_captured
+        ON snapshots(user_id, captured_at DESC);
+    `;
+    console.log('✅ Performance indexes on snapshots ready');
+
     // ─── TABLE 4: restore_requests ────────────────────────────────────────────
     // Phase 3: PWA sends a restore request targeting a specific device.
     // The extension polls for pending requests and opens the tabs locally.
@@ -166,6 +199,9 @@ async function migrate() {
     await sql`
       CREATE INDEX IF NOT EXISTS idx_restore_device_status
         ON restore_requests(target_device_id, status, expires_at);
+    `;
+    await sql`
+      ALTER TABLE restore_requests ADD COLUMN IF NOT EXISTS source_device_id UUID REFERENCES devices(id);
     `;
     console.log('✅ Index on restore_requests ready');
 
