@@ -41,7 +41,9 @@ const __dirname = path.dirname(__filename);
 // For local dev, keep HTTPS_ENABLED=true (default) with mkcert certs.
 // ─────────────────────────────────────────────────────────────
 
-const HTTPS_ENABLED = process.env.HTTPS_ENABLED !== 'false';
+// Automatically disable HTTPS on Render since SSL is terminated at the proxy
+const isRender = process.env.RENDER === 'true';
+const HTTPS_ENABLED = !isRender && process.env.HTTPS_ENABLED !== 'false';
 
 let httpsOptions: { key: Buffer; cert: Buffer } | undefined;
 
