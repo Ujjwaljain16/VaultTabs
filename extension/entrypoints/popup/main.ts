@@ -66,7 +66,9 @@ async function init() {
 
   if (!storage.is_logged_in || !storage.jwt_token) {
     // Pre-fill device name for registration/login
-    const defaultName = getDeviceName();
+    // If we have a saved device_name in storage (e.g. from a previous login), use it.
+    // Otherwise fallback to the browser-detected name.
+    const defaultName = storage.device_name || getDeviceName();
     el<HTMLInputElement>('reg-device-name').value = defaultName;
     el<HTMLInputElement>('login-device-name').value = defaultName;
 
