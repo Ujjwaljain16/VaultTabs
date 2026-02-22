@@ -103,8 +103,8 @@ async function showDashboard(storage: Awaited<ReturnType<typeof loadFromStorage>
   // Static fields
   el('user-email-display').textContent = storage.user_email || '';
   const deviceName = storage.device_name || '—';
-  el('info-device').textContent = deviceName.length > 7
-    ? deviceName.slice(0, 6) + '…' : deviceName;
+  el('info-device').textContent = deviceName.length > 12
+    ? deviceName.slice(0, 10) + '…' : deviceName;
 
   await refreshDashboard();
 }

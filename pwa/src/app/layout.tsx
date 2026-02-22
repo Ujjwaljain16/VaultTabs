@@ -5,6 +5,11 @@ export const metadata: Metadata = {
   title: 'VaultTabs',
   description: 'Zero-knowledge cross-browser tab sync',
   manifest: '/manifest.json',
+  icons: {
+    icon: '/favicon.png',
+    shortcut: '/favicon.png',
+    apple: '/icon-192.png',
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',

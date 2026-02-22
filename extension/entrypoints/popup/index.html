@@ -18,10 +18,9 @@
     <!-- ── AUTH (register / login) ────────────────────────── -->
     <div id="screen-auth" class="screen hidden">
       <div class="logo">
-        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
-          <rect width="32" height="32" rx="8" fill="#0F0F0F"/>
-          <path d="M16 6L8 10V16C8 20.4 11.6 24.5 16 26C20.4 24.5 24 20.4 24 16V10L16 6Z" fill="#4ADE80" opacity="0.9"/>
-          <path d="M13 16L15 18L19 14" stroke="#0F0F0F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="m9 12 2 2 4-4"/>
         </svg>
         <span>VaultTabs</span>
       </div>
@@ -34,37 +33,37 @@
       <!-- Register -->
       <form id="form-register" class="auth-form">
         <div class="field">
-          <label for="reg-email">Email</label>
+          <label for="reg-email">Email Address</label>
           <input type="email" id="reg-email" placeholder="you@example.com" required />
         </div>
         <div class="field">
-          <label for="reg-password">Password</label>
+          <label for="reg-password">Master Password</label>
           <input type="password" id="reg-password" placeholder="Min 8 characters" required minlength="8" />
         </div>
         <div class="field">
-          <label for="reg-device-name">Device Name (Optional)</label>
+          <label for="reg-device-name">Device Name</label>
           <input type="text" id="reg-device-name" placeholder="e.g. Home PC" />
         </div>
         <div class="field">
           <label for="reg-password-confirm">Confirm Password</label>
-          <input type="password" id="reg-password-confirm" placeholder="Same password again" required />
+          <input type="password" id="reg-password-confirm" placeholder="Repeat password" required />
         </div>
         <div id="reg-error" class="error-msg hidden"></div>
         <button type="submit" id="btn-register" class="btn-primary">
-          <span class="btn-text">Create Account</span>
-          <span class="btn-loading hidden">Setting up encryption...</span>
+          <span class="btn-text">Create Vault</span>
+          <span class="btn-loading hidden">Initializing...</span>
         </button>
-        <p class="hint">🔒 Encrypted before leaving your device.</p>
+        <p class="hint">🔒 E2E Encrypted. Zero-knowledge.</p>
       </form>
 
       <!-- Login -->
       <form id="form-login" class="auth-form hidden">
         <div class="field">
-          <label for="login-email">Email</label>
+          <label for="login-email">Email Address</label>
           <input type="email" id="login-email" placeholder="you@example.com" required />
         </div>
         <div class="field">
-          <label for="login-password">Your Password</label>
+          <label for="login-password">Master Password</label>
           <input type="password" id="login-password" placeholder="Your password" required />
         </div>
         <div class="field">
@@ -73,8 +72,8 @@
         </div>
         <div id="login-error" class="error-msg hidden"></div>
         <button type="submit" id="btn-login" class="btn-primary">
-          <span class="btn-text">Login</span>
-          <span class="btn-loading hidden">Decrypting keys...</span>
+          <span class="btn-text">Unlock Vault</span>
+          <span class="btn-loading hidden">Decrypting...</span>
         </button>
       </form>
     </div>
@@ -84,13 +83,12 @@
 
       <!-- Header -->
       <div class="logo">
-        <svg width="22" height="22" viewBox="0 0 32 32" fill="none">
-          <rect width="32" height="32" rx="8" fill="#0F0F0F"/>
-          <path d="M16 6L8 10V16C8 20.4 11.6 24.5 16 26C20.4 24.5 24 20.4 24 16V10L16 6Z" fill="#4ADE80" opacity="0.9"/>
-          <path d="M13 16L15 18L19 14" stroke="#0F0F0F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="m9 12 2 2 4-4"/>
         </svg>
         <span>VaultTabs</span>
-        <button id="btn-logout" class="btn-icon" title="Logout">↩</button>
+        <button id="btn-logout" class="btn-icon" title="Logout">LOGOUT</button>
       </div>
 
       <!-- Sync status bar -->
@@ -100,10 +98,10 @@
           <span id="status-text">Syncing...</span>
           <span class="sync-count" id="sync-count"></span>
         </div>
-        <div class="status-detail" id="status-detail">Waiting for first sync</div>
+        <div class="status-detail" id="status-detail">Waiting for pulse...</div>
       </div>
 
-      <!-- Error banner (hidden unless there's an error) -->
+      <!-- Error banner -->
       <div id="error-banner" class="error-banner hidden">
         <span id="error-banner-text"></span>
       </div>
@@ -112,22 +110,40 @@
       <div class="stats-row">
         <div class="stat-box">
           <div class="stat-value" id="info-tab-count">—</div>
-          <div class="stat-label">Tabs</div>
+          <div class="stat-label">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 2px; margin-top: -2px;">
+              <path d="M2 3h10v10H2z"/><path d="m22 3-5 5"/><path d="m17 3 5 5"/>
+            </svg>
+            Tabs
+          </div>
         </div>
         <div class="stat-box">
           <div class="stat-value" id="info-window-count">—</div>
-          <div class="stat-label">Windows</div>
+          <div class="stat-label">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 2px; margin-top: -2px;">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+              <line x1="3" y1="9" x2="21" y2="9"/>
+            </svg>
+            Windows
+          </div>
         </div>
         <div class="stat-box" id="stat-device-box" title="Click to rename device">
           <div class="stat-value" id="info-device">—</div>
-          <div class="stat-label">Device <span class="edit-icon">✎</span></div>
+          <div class="stat-label">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 2px; margin-top: -2px;">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+              <line x1="8" y1="21" x2="16" y2="21"/>
+              <line x1="12" y1="17" x2="12" y2="21"/>
+            </svg>
+            Host <span class="edit-icon">✎</span>
+          </div>
         </div>
       </div>
 
-      <!-- Rename device semi-modal (hidden by default) -->
+      <!-- Rename device -->
       <div id="rename-overlay" class="overlay hidden">
         <div class="overlay-content">
-          <p class="overlay-title">Rename Device</p>
+          <p class="overlay-title">Rename Host</p>
           <input type="text" id="rename-input" placeholder="e.g. Work PC" />
           <div id="rename-error" class="error-msg hidden"></div>
           <div class="overlay-buttons">
@@ -139,101 +155,91 @@
 
       <!-- Recent tabs preview -->
       <div class="section-header">
-        <span>Open Tabs</span>
+        <span>Active Session</span>
         <span class="section-hint" id="tabs-hint"></span>
       </div>
       <div id="tab-list" class="tab-list">
-        <!-- Populated by main.ts -->
-        <div class="tab-list-empty">Loading tabs...</div>
+        <div class="tab-list-empty">Scanning for tabs...</div>
       </div>
 
       <!-- Footer -->
       <div class="footer-row">
         <span id="user-email-display" class="user-email"></span>
-        <span class="enc-badge">🔒 E2E encrypted</span>
+        <span class="enc-badge">
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 3px; margin-top: -1px;">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+          Encrypted
+        </span>
       </div>
 
-      <!-- Restore toast — slides up when a restore completes -->
+      <!-- Restore toast -->
       <div id="restore-toast" class="restore-toast hidden">
         <span id="restore-toast-text">✓ Session restored!</span>
       </div>
     </div>
 
     <!-- ── RECOVERY KEY ──────────────────────────────────────── -->
-    <!-- Shown ONCE after registration. Never shown again. -->
     <div id="screen-recovery" class="screen hidden">
       <div class="logo">
-        <svg width="22" height="22" viewBox="0 0 32 32" fill="none">
-          <rect width="32" height="32" rx="8" fill="#0F0F0F"/>
-          <path d="M16 6L8 10V16C8 20.4 11.6 24.5 16 26C20.4 24.5 24 20.4 24 16V10L16 6Z" fill="#4ADE80" opacity="0.9"/>
-          <path d="M13 16L15 18L19 14" stroke="#0F0F0F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="m9 12 2 2 4-4"/>
         </svg>
         <span>VaultTabs</span>
       </div>
 
       <div class="recovery-box">
-        <div class="recovery-icon">🔑</div>
-        <p class="recovery-title">Save Your Recovery Key</p>
+        <p class="recovery-title">EMERGENCY ACCESS KEY</p>
         <p class="recovery-desc">
-          If you forget your password, this code is the <strong>only</strong> way to recover your data.
-          Save it somewhere safe. It will not be shown again.
+          This key is the <strong>only way</strong> to recover your vault if you lose your password.
         </p>
 
-        <!-- The code itself -->
         <div class="recovery-code-block">
-          <div class="recovery-code" id="recovery-code-text">VAULT-XXXX-XXXX-XXXX-XXXX</div>
-          <button class="recovery-copy-btn" id="btn-copy-recovery" title="Copy to clipboard">
-            <span id="copy-label">Copy</span>
-          </button>
+          <div class="recovery-code" id="recovery-code-text">VAULT-XXXX-XXXX-XXXX</div>
+          <button class="recovery-copy-btn" id="btn-copy-recovery">COPY</button>
         </div>
 
-        <!-- Download as .txt -->
         <button class="recovery-download-btn" id="btn-download-recovery">
-          ↓ Download as .txt
+          DOWNLOAD RECOVERY.TXT
         </button>
 
-        <!-- Warning -->
         <div class="recovery-warning">
-          ⚠ The server does not store this code.
-          Once you close this popup it is gone.
+          THE SERVER DOES NOT STORE THIS KEY.
+          IF YOU LOSE IT, YOUR DATA IS PERMANENTLY ENCRYPTED.
         </div>
 
-        <!-- Confirm checkbox -->
         <label class="recovery-confirm-label">
           <input type="checkbox" id="recovery-saved-check" />
-          <span>I've saved my recovery key in a safe place</span>
+          <span>I have securely stored my recovery key.</span>
         </label>
 
-        <!-- Continue -->
         <button id="btn-recovery-continue" class="btn-primary" disabled>
-          Continue to Dashboard →
+          ENTER VAULT →
         </button>
       </div>
     </div>
 
     <!-- ── RE-LOGIN PROMPT ─────────────────────────────────── -->
-    <!-- Shown when session is expired (master key lost from IndexedDB) -->
     <div id="screen-relogin" class="screen hidden">
       <div class="logo">
-        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
-          <rect width="32" height="32" rx="8" fill="#0F0F0F"/>
-          <path d="M16 6L8 10V16C8 20.4 11.6 24.5 16 26C20.4 24.5 24 20.4 24 16V10L16 6Z" fill="#4ADE80" opacity="0.9"/>
-          <path d="M13 16L15 18L19 14" stroke="#0F0F0F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="m9 12 2 2 4-4"/>
         </svg>
         <span>VaultTabs</span>
       </div>
       <div class="relogin-box">
-        <div class="relogin-icon">🔑</div>
-        <p class="relogin-title">Session Expired</p>
-        <p class="relogin-desc">Your encryption key needs to be re-loaded. Enter your password to continue.</p>
+        <p class="relogin-title">Vault Locked</p>
+        <p class="relogin-desc">Your session has timed out. Please enter your master password to unlock your vault.</p>
         <form id="form-relogin" class="auth-form">
-          <div class="field">
+          <div class="field" style="display:none;">
             <label for="relogin-email">Email</label>
             <input type="email" id="relogin-email" required />
           </div>
           <div class="field">
-            <label for="relogin-password">Password</label>
-            <input type="password" id="relogin-password" placeholder="Your password" required />
+            <label for="relogin-password">Master Password</label>
+            <input type="password" id="relogin-password" placeholder="••••••••" required />
           </div>
           <div id="relogin-error" class="error-msg hidden"></div>
           <button type="submit" id="btn-relogin" class="btn-primary">

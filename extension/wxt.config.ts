@@ -19,6 +19,12 @@ export default defineConfig({
     description: 'Zero-knowledge cross-browser tab sync',
     version: '0.1.0',
     permissions: ['tabs', 'storage', 'alarms', 'windows'],
+    icons: {
+      16: 'icon-16.png',
+      32: 'icon-32.png',
+      48: 'icon-48.png',
+      128: 'icon-128.png',
+    },
     host_permissions: [
       // Local dev endpoints
       'http://localhost:3000/*',

@@ -222,26 +222,47 @@ export default function DashboardPage() {
   const renderStats = (isSkeleton = false) => (
     <div className={styles.statsBar}>
       <div className={styles.stat}>
-        <span className={isSkeleton ? `${styles.statValue} ${styles.skeleton}` : styles.statValue} style={isSkeleton ? { width: '20px', height: '18px' } : {}}>
-          {isSkeleton ? '' : devices.length}
-        </span>
-        <span className={styles.statLabel}>devices</span>
+        <div className={styles.statIcon}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
+          </svg>
+        </div>
+        <div className={styles.statInfo}>
+          <span className={isSkeleton ? `${styles.statValue} ${styles.skeleton}` : styles.statValue}>
+            {isSkeleton ? '' : devices.length}
+          </span>
+          <span className={styles.statLabel}>devices</span>
+        </div>
       </div>
-      <div className={styles.statDivider} />
+
       <div className={styles.stat}>
-        <span className={isSkeleton ? `${styles.statValue} ${styles.skeleton}` : styles.statValue} style={isSkeleton ? { width: '30px', height: '18px' } : {}}>
-          {isSkeleton ? '' : totalTabs(devices)}
-        </span>
-        <span className={styles.statLabel}>total tabs</span>
+        <div className={styles.statIcon}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 3h10v10H2z" /><path d="m22 3-5 5" /><path d="m17 3 5 5" />
+          </svg>
+        </div>
+        <div className={styles.statInfo}>
+          <span className={isSkeleton ? `${styles.statValue} ${styles.skeleton}` : styles.statValue}>
+            {isSkeleton ? '' : totalTabs(devices)}
+          </span>
+          <span className={styles.statLabel}>tabs</span>
+        </div>
       </div>
-      <div className={styles.statDivider} />
+
       <div className={styles.stat}>
-        <span className={isSkeleton ? `${styles.statValue} ${styles.skeleton}` : styles.statValue} style={isSkeleton ? { width: '40px', height: '18px', fontSize: '11px' } : { fontSize: '11px' }}>
-          {isSkeleton ? '' : (lastRefresh ? formatRelativeTime(lastRefresh.toISOString()) : '—')}
-        </span>
-        <span className={styles.statLabel}>refreshed</span>
+        <div className={styles.statIcon}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" />
+          </svg>
+        </div>
+        <div className={styles.statInfo}>
+          <span className={isSkeleton ? `${styles.statValue} ${styles.skeleton}` : styles.statValue} style={{ fontSize: '11px' }}>
+            {isSkeleton ? '' : (lastRefresh ? formatRelativeTime(lastRefresh.toISOString()) : '—')}
+          </span>
+          <span className={styles.statLabel}>active</span>
+        </div>
       </div>
-      <div className={styles.encBadge}><span className={styles.encDot} />E2E</div>
+      <div className={styles.encBadge}><span className={styles.encDot} />SECURE</div>
     </div>
   );
 
@@ -435,7 +456,17 @@ function DeviceCard({ device, allDevices, expanded, onToggle, onOpenTab, onResto
 
       <button className={styles.deviceHeader} onClick={onToggle}>
         <div className={styles.deviceLeft}>
-          <div className={styles.deviceIcon}>{isLoading ? '○' : isError ? '✕' : '◉'}</div>
+          <div className={styles.deviceIcon}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              {isLoading ? (
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              ) : isError ? (
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+              ) : (
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+              )}
+            </svg>
+          </div>
           <div>
             <div className={styles.deviceName}>{device.deviceName}</div>
             <div className={styles.deviceMeta}>
@@ -447,7 +478,11 @@ function DeviceCard({ device, allDevices, expanded, onToggle, onOpenTab, onResto
         </div>
         <div className={styles.deviceRight}>
           {!isLoading && !isError && <span className={styles.tabCount}>{device.tabs.length}</span>}
-          <span className={styles.chevron} style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }}>↓</span>
+          <span className={styles.chevron} style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </span>
         </div>
       </button>
 

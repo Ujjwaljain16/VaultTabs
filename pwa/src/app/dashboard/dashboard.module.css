@@ -15,6 +15,11 @@
   100% { background-position: 200% 0; }
 }
 
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.95); }
+}
+
 .skeleton {
   background: linear-gradient(90deg, var(--black-2) 25%, var(--black-3) 50%, var(--black-2) 75%);
   background-size: 200% 100%;
@@ -29,6 +34,7 @@
   flex-direction: column;
   background: var(--black);
   overflow: hidden;
+  color: var(--text);
 }
 
 /* ── Loading / error screens ──────────────────── */
@@ -100,10 +106,10 @@
   border-radius: var(--r-sm);
   cursor: pointer;
   margin-top: 4px;
-  transition: border-color 0.15s;
+  transition: all 0.15s;
 }
 
-.retryBtn:hover { border-color: var(--green-border); color: var(--green); }
+.retryBtn:hover { border-color: var(--green-border); color: var(--green); background: var(--black-2); }
 
 /* ── Header ───────────────────────────────────── */
 .header {
@@ -126,6 +132,7 @@
   font-size: 15px;
   font-weight: 600;
   color: var(--text);
+  letter-spacing: -0.01em;
 }
 
 .headerRight {
@@ -148,8 +155,9 @@
 }
 
 .refreshBtn:hover, .logoutBtn:hover {
-  border-color: var(--border-2);
-  color: var(--text);
+  border-color: var(--green-border);
+  color: var(--green);
+  background: var(--black-2);
 }
 
 .refreshBtn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -158,13 +166,40 @@
 .statsBar {
   display: flex;
   align-items: center;
-  gap: 0;
-  padding: 10px 16px;
+  gap: 16px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
 .stat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.statIcon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  background: var(--black-2);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.stat:hover .statIcon {
+  color: var(--green);
+  border-color: var(--green-border);
+  background: var(--black-3);
+}
+
+.statInfo {
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -173,24 +208,24 @@
 .statValue {
   font-family: var(--font-mono);
   font-size: 16px;
-  font-weight: 600;
-  color: var(--green);
+  font-weight: 700;
+  color: var(--text);
   line-height: 1;
 }
 
 .statLabel {
-  font-size: 9.5px;
+  font-size: 9px;
   color: var(--text-3);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.1em;
+  font-weight: 700;
   font-family: var(--font-mono);
 }
 
 .statDivider {
   width: 1px;
-  height: 28px;
+  height: 24px;
   background: var(--border);
-  margin: 0 16px;
 }
 
 .encBadge {
@@ -199,13 +234,14 @@
   align-items: center;
   gap: 5px;
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 9px;
   color: var(--green-dim);
   background: var(--green-muted);
   border: 1px solid var(--green-border);
   border-radius: 20px;
-  padding: 3px 9px;
-  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  letter-spacing: 0.08em;
+  font-weight: 700;
 }
 
 .encDot {
@@ -281,6 +317,7 @@
   border: 1px solid var(--border-2);
   border-radius: var(--r);
   overflow: hidden;
+  transition: all 0.2s;
 }
 
 .deviceHeader {
@@ -293,7 +330,7 @@
   border: none;
   cursor: pointer;
   text-align: left;
-  gap: 10px;
+  gap: 12px;
   transition: background 0.12s;
 }
 
@@ -302,22 +339,35 @@
 .deviceLeft {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex: 1;
   overflow: hidden;
 }
 
 .deviceIcon {
-  font-size: 14px;
-  color: var(--green);
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-sm);
+  background: var(--black-3);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--green-dim);
   flex-shrink: 0;
-  font-family: var(--font-mono);
+  transition: all 0.2s;
+}
+
+.deviceCard:hover .deviceIcon {
+  color: var(--green);
+  border-color: var(--green-border);
+  transform: translateY(-1px);
 }
 
 .deviceName {
   font-family: var(--font-mono);
   font-size: 12.5px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -327,7 +377,7 @@
 .deviceMeta {
   font-size: 10.5px;
   color: var(--text-3);
-  margin-top: 1px;
+  margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -349,52 +399,77 @@
   border: 1px solid var(--green-border);
   border-radius: 4px;
   padding: 2px 7px;
+  font-weight: 600;
 }
 
 .chevron {
   font-size: 12px;
   color: var(--text-3);
-  display: inline-block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s ease;
 }
 
 /* ── Tabs container ───────────────────────────── */
 .tabsContainer {
   border-top: 1px solid var(--border);
+  background: var(--black);
   animation: fadeSlide 0.2s ease forwards;
 }
 
-.openAllRow {
+.actionsRow {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 14px;
+  gap: 6px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
+  background: var(--black-2);
 }
 
-.openAllHint {
-  font-size: 10.5px;
-  color: var(--text-3);
-  font-family: var(--font-mono);
-}
-
-.openAllBtn {
-  background: none;
-  border: 1px solid var(--green-border);
-  color: var(--green-dim);
+/* Primary: restore to desktop */
+.restoreBtn {
+  flex: 2;
+  background: var(--green);
+  border: 1px solid var(--green);
+  color: var(--black);
   font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  padding: 4px 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 8px 12px;
   border-radius: var(--r-sm);
   cursor: pointer;
   transition: all 0.15s;
-  flex-shrink: 0;
+  white-space: nowrap;
+  text-transform: uppercase;
 }
 
-.openAllBtn:active {
-  background: var(--green-muted);
-  color: var(--green);
+.restoreBtn:hover {
+  background: var(--green-bright);
+  box-shadow: 0 0 15px rgba(57, 255, 133, 0.3);
+}
+
+/* Secondary: open on phone */
+.openAllBtn {
+  flex: 1;
+  background: var(--black-3);
+  border: 1px solid var(--border-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+.openAllBtn:hover {
+  border-color: var(--text-3);
+  background: var(--black-2);
 }
 
 .tabRows {
@@ -406,8 +481,8 @@
 .tabRow {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 14px;
+  gap: 12px;
+  padding: 10px 14px;
   background: none;
   border: none;
   border-bottom: 1px solid var(--border);
@@ -419,16 +494,18 @@
 }
 
 .tabRow:last-child { border-bottom: none; }
-.tabRow:active { background: var(--black-3); }
+.tabRow:hover { background: var(--black-2); }
 
 .tabRowActive {
-  background: rgba(57, 255, 133, 0.04);
+  background: rgba(57, 255, 133, 0.05);
 }
 
 .favicon {
-  width: 16px; height: 16px;
+  width: 18px; height: 18px;
   flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
+  border-radius: 4px;
+  background: var(--black-3);
 }
 
 .faviconFallback {
@@ -444,11 +521,12 @@
 
 .tabTitle {
   font-size: 12px;
+  font-weight: 500;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 1.3;
+  line-height: 1.4;
 }
 
 .tabUrl {
@@ -464,24 +542,32 @@
 .tabMeta {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
 .activeDot {
-  width: 5px; height: 5px;
+  width: 6px; height: 6px;
   border-radius: 50%;
   background: var(--green);
+  box-shadow: 0 0 8px var(--green);
 }
 
 .pinnedIcon {
-  font-size: 8px;
+  font-size: 9px;
   color: var(--text-3);
 }
 
 .openIcon {
   font-size: 12px;
   color: var(--text-3);
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+
+.tabRow:hover .openIcon {
+  opacity: 1;
+  color: var(--green);
 }
 
 .tabActions {
@@ -495,17 +581,21 @@
   border: 1px solid var(--border-2);
   color: var(--text-3);
   font-family: var(--font-mono);
-  font-size: 14px;
-  width: 24px;
-  height: 24px;
+  font-size: 13px;
+  width: 26px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.1s;
+  transition: all 0.15s;
   padding: 0;
-  line-height: 1;
+  opacity: 0;
+}
+
+.tabRow:hover .miniRestoreBtn {
+  opacity: 1;
 }
 
 .miniRestoreBtn:hover {
@@ -514,221 +604,184 @@
   background: var(--green-muted);
 }
 
-.tabRow:hover .openIcon,
-.tabRow:hover .miniRestoreBtn { opacity: 1; }
-
-.miniRestoreBtn { opacity: 0; }
-
 .noTabs {
-  padding: 14px;
-  font-size: 11.5px;
+  padding: 20px;
+  font-size: 12px;
   color: var(--text-3);
   text-align: center;
   font-family: var(--font-mono);
-  border-top: 1px solid var(--border);
+  background: var(--black);
 }
 
 /* ── RESTORE OVERLAY ──────────────────────────── */
 .restoreOverlay {
   position: fixed;
   inset: 0;
-  background: rgba(8,8,8,0.88);
-  backdrop-filter: blur(6px);
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 50;
+  z-index: 100;
   padding: 24px;
 }
 
 .restoreCard {
-  background: var(--black-3);
+  background: var(--black-2);
   border: 1px solid var(--border-2);
   border-radius: var(--r-lg);
-  padding: 28px 24px;
+  padding: 32px 24px;
   width: 100%;
   max-width: 320px;
   text-align: center;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  animation: fadeSlide 0.25s ease forwards;
+  gap: 16px;
+  animation: fadeSlide 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.4);
 }
 
 .restoreSpinner {
-  width: 32px; height: 32px;
-  border: 2px solid var(--border-2);
+  width: 36px; height: 36px;
+  border: 3px solid var(--black-3);
   border-top-color: var(--green);
   border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-  flex-shrink: 0;
+  animation: spin 0.8s linear infinite;
 }
 
 .restoreTitle {
   font-family: var(--font-mono);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 700;
   color: var(--text);
 }
 
 .restoreDesc {
-  font-size: 12px;
-  color: var(--text-2);
+  font-size: 12.5px;
+  color: var(--text-3);
   line-height: 1.6;
-  max-width: 240px;
 }
 
 .restoreDesc strong {
   color: var(--text);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .restorePulse {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
-  margin: 4px 0;
 }
 
 .restoreDot {
-  width: 7px; height: 7px;
+  width: 8px; height: 8px;
   border-radius: 50%;
   background: var(--green);
   animation: pulse 1.2s ease-in-out infinite;
 }
 
 .restoreSuccessIcon {
-  width: 44px; height: 44px;
+  width: 52px; height: 52px;
   border-radius: 50%;
   background: var(--green-muted);
   border: 1px solid var(--green-border);
   color: var(--green);
-  font-size: 20px;
+  font-size: 24px;
   display: flex; align-items: center; justify-content: center;
-  animation: fadeIn 0.3s ease forwards;
+  box-shadow: 0 0 20px rgba(57, 255, 133, 0.1);
 }
 
 .restoreErrorIcon {
-  width: 44px; height: 44px;
+  width: 52px; height: 52px;
   border-radius: 50%;
   background: var(--error-dim);
-  border: 1px solid rgba(255,94,94,0.2);
+  border: 1px solid rgba(255, 94, 94, 0.2);
   color: var(--error);
-  font-size: 18px;
+  font-size: 22px;
   display: flex; align-items: center; justify-content: center;
 }
 
 .restoreCancelBtn {
   background: none;
   border: 1px solid var(--border-2);
-  color: var(--text-2);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  padding: 6px 18px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  margin-top: 4px;
-  transition: all 0.15s;
-}
-
-.restoreCancelBtn:hover { border-color: var(--text-3); color: var(--text); }
-
-/* ── ACTIONS ROW (inside device card) ─────────── */
-.actionsRow {
-  display: flex;
-  gap: 6px;
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--border);
-}
-
-/* Primary: restore to desktop */
-.restoreBtn {
-  flex: 1;
-  background: var(--green-muted);
-  border: 1px solid var(--green-border);
-  color: var(--green);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  padding: 7px 8px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-
-.restoreBtn:active {
-  background: rgba(57,255,133,0.2);
-  box-shadow: 0 0 12px rgba(57,255,133,0.2);
-}
-
-/* Secondary: open on phone */
-.openAllBtn {
-  background: none;
-  border: 1px solid var(--border-2);
   color: var(--text-3);
   font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  padding: 7px 10px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  padding: 8px 20px;
   border-radius: var(--r-sm);
   cursor: pointer;
   transition: all 0.15s;
-  white-space: nowrap;
+  text-transform: uppercase;
+  font-weight: 600;
 }
 
-.openAllBtn:active { background: var(--black-4); color: var(--text-2); }
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: scale(0.85); }
-  to   { opacity: 1; transform: scale(1); }
+.restoreCancelBtn:hover {
+  border-color: var(--text-2);
+  color: var(--text);
+  background: var(--black-3);
 }
+
+/* ── PICKER LIST ─────────────────────────────── */
 .pickerList {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
-  max-height: 200px;
+  gap: 10px;
+  margin: 12px 0;
+  max-height: 180px;
   overflow-y: auto;
+  padding-right: 4px;
 }
 
 .pickerItem {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
-  background: var(--black-2);
+  padding: 12px 14px;
+  background: var(--black);
   border: 1px solid var(--border-2);
   border-radius: var(--r);
   cursor: pointer;
   text-align: left;
-  transition: all 0.15s;
+  transition: all 0.2s;
   width: 100%;
   color: var(--text);
 }
 
-.pickerItem:active {
-  background: var(--black-4);
+.pickerItem:hover {
   border-color: var(--green-border);
+  background: var(--black-3);
+}
+
+.pickerItem:active {
+  transform: scale(0.98);
 }
 
 .pickerIcon {
   font-size: 14px;
+  color: var(--green-dim);
+  transition: color 0.2s;
+}
+
+.pickerItem:hover .pickerIcon {
   color: var(--green);
-  font-family: var(--font-mono);
 }
 
 .pickerName {
   font-family: var(--font-mono);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+/* ── RESPONSIVE ──────────────────────────────── */
+@media (min-width: 480px) {
+  .root {
+    max-width: 420px;
+    margin: 0 auto;
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+  }
 }
