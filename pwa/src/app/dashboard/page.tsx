@@ -30,6 +30,7 @@ export default function DashboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [expandedDevice, setExpandedDevice] = useState<string | null>(null);
   const [restore, setRestore] = useState<RestoreState>({ phase: 'idle' });
+  const [devicePicker, setDevicePicker] = useState<{ url: string; snapshotId: string } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Load + decrypt snapshots ───────────────────────────────────────────────
@@ -108,13 +109,13 @@ export default function DashboardPage() {
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
   // ── Restore to device ─────────────────────────────────────────────────────
-  async function handleRestoreToDevice(targetDeviceId: string, targetDeviceName: string, snapshotId?: string) {
+  async function handleRestoreToDevice(targetDeviceId: string, targetDeviceName: string, snapshotId?: string, targetUrl?: string) {
     const session = loadSession();
     if (!session) { router.replace('/login'); return; }
 
     setRestore({ phase: 'sending' });
 
-    const result = await apiCreateRestoreRequest(session.jwt_token, targetDeviceId, snapshotId);
+    const result = await apiCreateRestoreRequest(session.jwt_token, targetDeviceId, snapshotId, targetUrl);
     if (!result.ok || !result.data) {
       setRestore({ phase: 'error', message: result.error || 'Failed to send restore request' });
       return;
@@ -292,6 +293,32 @@ export default function DashboardPage() {
   return (
     <div className={styles.root}>
 
+      {/* ── Device picker overlay for single tab restore ────────────── */}
+      {devicePicker && (
+        <div className={styles.restoreOverlay} onClick={() => setDevicePicker(null)}>
+          <div className={styles.restoreCard} onClick={e => e.stopPropagation()}>
+            <div className={styles.restoreTitle}>Restore Tab To...</div>
+            <div className={styles.restoreDesc}>Select a device to open this tab on:</div>
+            <div className={styles.pickerList}>
+              {devices.map(d => (
+                <button
+                  key={d.deviceId}
+                  className={styles.pickerItem}
+                  onClick={() => {
+                    handleRestoreToDevice(d.deviceId, d.deviceName, devicePicker.snapshotId, devicePicker.url);
+                    setDevicePicker(null);
+                  }}
+                >
+                  <span className={styles.pickerIcon}>◉</span>
+                  <div className={styles.pickerName}>{d.deviceName}</div>
+                </button>
+              ))}
+            </div>
+            <button className={styles.restoreCancelBtn} onClick={() => setDevicePicker(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       {/* ── Restore overlay ─────────────────────────────────────────────── */}
       {restore.phase !== 'idle' && (
         <div className={styles.restoreOverlay}>
@@ -372,7 +399,8 @@ export default function DashboardPage() {
                 expanded={expandedDevice === device.deviceId}
                 onToggle={() => setExpandedDevice(expandedDevice === device.deviceId ? null : device.deviceId)}
                 onOpenTab={openTab}
-                onRestoreToDevice={(targetId, targetName) => handleRestoreToDevice(targetId, targetName, device.snapshotId)}
+                onRestoreToDevice={(targetId, targetName, targetUrl) => handleRestoreToDevice(targetId, targetName, device.snapshotId, targetUrl)}
+                onShowDevicePicker={(url) => setDevicePicker({ url, snapshotId: device.snapshotId })}
                 formatRelativeTime={formatRelativeTime}
                 getHostname={getHostname}
               />
@@ -392,12 +420,13 @@ interface DeviceCardProps {
   expanded: boolean;
   onToggle: () => void;
   onOpenTab: (url: string) => void;
-  onRestoreToDevice: (targetDeviceId: string, targetDeviceName: string) => void;
+  onRestoreToDevice: (targetDeviceId: string, targetDeviceName: string, targetUrl?: string) => void;
+  onShowDevicePicker: (url: string) => void;
   formatRelativeTime: (s: string | Date) => string;
   getHostname: (url: string) => string;
 }
 
-function DeviceCard({ device, allDevices, expanded, onToggle, onOpenTab, onRestoreToDevice, formatRelativeTime, getHostname }: DeviceCardProps) {
+function DeviceCard({ device, allDevices, expanded, onToggle, onOpenTab, onRestoreToDevice, onShowDevicePicker, formatRelativeTime, getHostname }: DeviceCardProps) {
   const isLoading = device.status === 'loading';
   const isError = device.status === 'error';
 
@@ -473,7 +502,20 @@ function DeviceCard({ device, allDevices, expanded, onToggle, onOpenTab, onResto
                   <div className={styles.tabMeta}>
                     {tab.active && <span className={styles.activeDot} />}
                     {tab.pinned && <span className={styles.pinnedIcon}>◆</span>}
-                    <span className={styles.openIcon}>↗</span>
+                    {/* Simple restore button - restores to the same device as the snapshot by default */}
+                    <div className={styles.tabActions}>
+                      <button
+                        className={styles.miniRestoreBtn}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onShowDevicePicker(tab.url);
+                        }}
+                        title="Restore this tab only"
+                      >
+                        ⟳
+                      </button>
+                      <span className={styles.openIcon}>↗</span>
+                    </div>
                   </div>
                 </button>
               ))}

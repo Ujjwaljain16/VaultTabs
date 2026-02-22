@@ -8,7 +8,7 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
 
   // ── POST /restore ────────────────────────────────────────────────────────
   fastify.post<{
-    Body: { target_device_id: string; snapshot_id?: string }
+    Body: { target_device_id: string; snapshot_id?: string; target_url?: string }
   }>('/restore', {
     preHandler: [authenticate],
   }, async (request, reply) => {
@@ -18,6 +18,7 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
       source_device_id: z.string().uuid().optional(),
       target_device_id: z.string().uuid(),
       snapshot_id: z.string().uuid().optional(),
+      target_url: z.string().url().optional(),
     });
 
     const parsed = schema.safeParse(request.body);
@@ -25,10 +26,10 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
       return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() });
     }
 
-    const { source_device_id, target_device_id, snapshot_id } = parsed.data;
+    const { source_device_id, target_device_id, snapshot_id, target_url } = parsed.data;
 
     try {
-      const req = await restoreService.createRequest(userId, target_device_id, snapshot_id, source_device_id);
+      const req = await restoreService.createRequest(userId, target_device_id, snapshot_id, source_device_id, target_url);
 
       return reply.status(201).send({
         message: 'Restore request created',
@@ -76,6 +77,7 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
           snapshot_id: initialPending.snapshot_id,
           snapshot_iv: initialPending.snapshot_iv,
           encrypted_blob: initialPending.encrypted_blob,
+          target_url: initialPending.target_url,
           created_at: initialPending.created_at,
           expires_at: initialPending.expires_at,
         }
@@ -102,6 +104,7 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
             snapshot_id: pending.snapshot_id,
             snapshot_iv: pending.snapshot_iv,
             encrypted_blob: pending.encrypted_blob,
+            target_url: pending.target_url,
             created_at: pending.created_at,
             expires_at: pending.expires_at,
           }
@@ -156,6 +159,7 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
         snapshot_id: pending.snapshot_id,
         snapshot_iv: pending.snapshot_iv,
         encrypted_blob: pending.encrypted_blob,
+        target_url: pending.target_url,
         created_at: pending.created_at,
         expires_at: pending.expires_at,
       },

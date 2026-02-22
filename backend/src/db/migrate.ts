@@ -201,9 +201,11 @@ async function migrate() {
         ON restore_requests(target_device_id, status, expires_at);
     `;
     await sql`
-      ALTER TABLE restore_requests ADD COLUMN IF NOT EXISTS source_device_id UUID REFERENCES devices(id);
+      ALTER TABLE restore_requests 
+        ADD COLUMN IF NOT EXISTS source_device_id UUID REFERENCES devices(id),
+        ADD COLUMN IF NOT EXISTS target_url TEXT;
     `;
-    console.log('✅ Index on restore_requests ready');
+    console.log('✅ Columns "source_device_id" and "target_url" in restore_requests ready');
 
     console.log('\n🎉 All migrations complete! Your database is ready.');
     console.log('\nNext step: npm run dev\n');

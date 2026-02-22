@@ -16,7 +16,7 @@ export class RestoreService implements IRestoreService {
         this.events.setMaxListeners(100);
     }
 
-    async createRequest(userId: string, targetDeviceId: string, snapshotId?: string, sourceDeviceId?: string): Promise<RestoreRequest> {
+    async createRequest(userId: string, targetDeviceId: string, snapshotId?: string, sourceDeviceId?: string, targetUrl?: string): Promise<RestoreRequest> {
         // 1. Get snapshot (latest if not specified)
         let snapshot;
         if (snapshotId) {
@@ -41,6 +41,7 @@ export class RestoreService implements IRestoreService {
             source_device_id: snapshot.device_id, // The device that captured the snapshot
             target_device_id: targetDeviceId,     // The device receiving the restore
             snapshot_id: snapshot.id,
+            target_url: targetUrl,
             expires_at: expiresAt,
         });
 

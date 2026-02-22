@@ -409,8 +409,8 @@ export default defineBackground(() => {
         return;
       }
 
-      // Open all tabs
-      await openRestoredTabs(tabs);
+      // Open tabs (either one specific URL or the whole snapshot)
+      await openRestoredTabs(tabs, req.target_url);
 
       // Mark completed on backend
       await apiCompleteRestore(req.id, 'completed');
@@ -443,7 +443,20 @@ export default defineBackground(() => {
   // We recreate the original window structure.
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async function openRestoredTabs(tabs: TabSnapshot[]) {
+  async function openRestoredTabs(tabs: TabSnapshot[], targetUrl?: string) {
+    if (targetUrl) {
+      console.log(`[VaultTabs] Single site restore: ${targetUrl}`);
+      // Find the tab in the snapshot to get original metadata if possible,
+      // though for a single URL we can just open it.
+      const existingTab = tabs.find(t => t.url === targetUrl);
+
+      await chrome.windows.create({
+        url: targetUrl,
+        focused: true,
+      });
+      return;
+    }
+
     // Group tabs by original windowId
     const windowGroups = new Map<number, TabSnapshot[]>();
     for (const tab of tabs) {

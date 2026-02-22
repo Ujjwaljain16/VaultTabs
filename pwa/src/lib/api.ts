@@ -113,11 +113,12 @@ export function apiGetSnapshotHistory(token: string, deviceId: string, limit = 2
 export function apiCreateRestoreRequest(
   token: string,
   targetDeviceId: string,
-  snapshotId?: string
+  snapshotId?: string,
+  targetUrl?: string
 ) {
   return apiFetch<{ request_id: string; status: string; expires_at: string }>(
     '/restore',
-    { method: 'POST', body: JSON.stringify({ target_device_id: targetDeviceId, snapshot_id: snapshotId }) },
+    { method: 'POST', body: JSON.stringify({ target_device_id: targetDeviceId, snapshot_id: snapshotId, target_url: targetUrl }) },
     token
   );
 }

@@ -19,7 +19,8 @@ export class PostgresRestoreRepository implements IRestoreRepository {
         r.expires_at,
         s.id          AS snapshot_id,
         s.iv          AS snapshot_iv,
-        s.encrypted_blob
+        s.encrypted_blob,
+        r.target_url
       FROM restore_requests r
       JOIN snapshots s ON s.id = r.snapshot_id
       WHERE r.target_device_id = ${targetDeviceId}
@@ -60,6 +61,7 @@ export class PostgresRestoreRepository implements IRestoreRepository {
         source_device_id,
         target_device_id,
         snapshot_id,
+        target_url,
         status,
         expires_at
       ) VALUES (
@@ -67,6 +69,7 @@ export class PostgresRestoreRepository implements IRestoreRepository {
         ${request.source_device_id},
         ${request.target_device_id},
         ${request.snapshot_id},
+        ${request.target_url || null},
         'pending',
         ${request.expires_at}
       )

@@ -482,11 +482,42 @@
 .openIcon {
   font-size: 12px;
   color: var(--text-3);
-  opacity: 0;
-  transition: opacity 0.15s;
 }
 
-.tabRow:hover .openIcon { opacity: 1; }
+.tabActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.miniRestoreBtn {
+  background: none;
+  border: 1px solid var(--border-2);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.1s;
+  padding: 0;
+  line-height: 1;
+}
+
+.miniRestoreBtn:hover {
+  border-color: var(--green-border);
+  color: var(--green);
+  background: var(--green-muted);
+}
+
+.tabRow:hover .openIcon,
+.tabRow:hover .miniRestoreBtn { opacity: 1; }
+
+.miniRestoreBtn { opacity: 0; }
 
 .noTabs {
   padding: 14px;
@@ -655,4 +686,49 @@
 @keyframes fadeIn {
   from { opacity: 0; transform: scale(0.85); }
   to   { opacity: 1; transform: scale(1); }
+}
+.pickerList {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.pickerItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--black-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
+  width: 100%;
+  color: var(--text);
+}
+
+.pickerItem:active {
+  background: var(--black-4);
+  border-color: var(--green-border);
+}
+
+.pickerIcon {
+  font-size: 14px;
+  color: var(--green);
+  font-family: var(--font-mono);
+}
+
+.pickerName {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
