@@ -27,20 +27,20 @@ import { openDB, DBSchema, IDBPDatabase } from 'idb';
 
 export interface ExtensionStorageData {
   // Auth
-  jwt_token?:    string;   // JWT from server — sent with every API request
-  user_id?:      string;   // UUID from server
-  user_email?:   string;   // For display in popup
+  jwt_token?: string;   // JWT from server — sent with every API request
+  user_id?: string;   // UUID from server
+  user_email?: string;   // For display in popup
   is_logged_in?: boolean;  // Quick flag — avoids parsing token on every check
 
   // Device
-  device_id?:    string;   // UUID from server after device registration
-  device_name?:  string;   // e.g. "Chrome on Mac"
+  device_id?: string;   // UUID from server after device registration
+  device_name?: string;   // e.g. "Chrome on Mac"
 
   // Sync state — used by popup to show status
-  last_sync_at?:  string;  // ISO timestamp of last successful upload
-  sync_count?:    number;  // Total number of successful syncs this session
+  last_sync_at?: string;  // ISO timestamp of last successful upload
+  sync_count?: number;  // Total number of successful syncs this session
   last_tab_count?: number; // How many tabs were in the last snapshot
-  last_error?:    string;  // Last sync error message (shown in popup)
+  last_error?: string;  // Last sync error message (shown in popup)
 
   // Master key re-login guard
   // We store this flag so on browser restart we know to check IndexedDB.
@@ -73,9 +73,16 @@ export async function loadFromStorage(): Promise<ExtensionStorageData> {
 
 export async function clearStorage(): Promise<void> {
   return new Promise((resolve, reject) => {
-    chrome.storage.local.clear(() => {
-      if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
-      else resolve();
+    chrome.storage.local.get(['device_id', 'device_name'], (preserved) => {
+      chrome.storage.local.clear(() => {
+        if (chrome.runtime.lastError) {
+          return reject(chrome.runtime.lastError);
+        }
+        chrome.storage.local.set(preserved, () => {
+          if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
+          else resolve();
+        });
+      });
     });
   });
 }

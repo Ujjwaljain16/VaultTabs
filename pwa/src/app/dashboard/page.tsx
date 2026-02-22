@@ -30,7 +30,7 @@ export default function DashboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [expandedDevice, setExpandedDevice] = useState<string | null>(null);
   const [restore, setRestore] = useState<RestoreState>({ phase: 'idle' });
-  const [devicePicker, setDevicePicker] = useState<{ url: string; snapshotId: string } | null>(null);
+  const [devicePicker, setDevicePicker] = useState<{ url?: string; snapshotId?: string } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Load + decrypt snapshots ───────────────────────────────────────────────
@@ -314,12 +314,12 @@ export default function DashboardPage() {
   return (
     <div className={styles.root}>
 
-      {/* ── Device picker overlay for single tab restore ────────────── */}
+      {/* ── Device picker overlay for single tab restore & full snapshot restore ────────────── */}
       {devicePicker && (
         <div className={styles.restoreOverlay} onClick={() => setDevicePicker(null)}>
           <div className={styles.restoreCard} onClick={e => e.stopPropagation()}>
-            <div className={styles.restoreTitle}>Restore Tab To...</div>
-            <div className={styles.restoreDesc}>Select a device to open this tab on:</div>
+            <div className={styles.restoreTitle}>{devicePicker.url ? 'Restore Tab To...' : 'Restore Tabs To...'}</div>
+            <div className={styles.restoreDesc}>Select a device to open {devicePicker.url ? 'this tab' : 'these tabs'} on:</div>
             <div className={styles.pickerList}>
               {devices.map(d => (
                 <button
@@ -442,7 +442,7 @@ interface DeviceCardProps {
   onToggle: () => void;
   onOpenTab: (url: string) => void;
   onRestoreToDevice: (targetDeviceId: string, targetDeviceName: string, targetUrl?: string) => void;
-  onShowDevicePicker: (url: string) => void;
+  onShowDevicePicker: (url?: string) => void;
   formatRelativeTime: (s: string | Date) => string;
   getHostname: (url: string) => string;
 }
@@ -489,20 +489,15 @@ function DeviceCard({ device, allDevices, expanded, onToggle, onOpenTab, onResto
       {expanded && !isLoading && !isError && (
         <div className={styles.tabsContainer}>
 
-          {/* Action row — restore + open on phone */}
+          {/* Action row — single restore button calling modal */}
           <div className={styles.actionsRow}>
-            <span style={{ fontSize: '11px', color: '#888', fontWeight: 600, letterSpacing: '0.5px', marginRight: '8px' }}>RESTORE TO:</span>
-            {allDevices.map(targetDev => (
-              <button
-                key={targetDev.deviceId}
-                className={styles.restoreBtn}
-                onClick={(e) => { e.stopPropagation(); onRestoreToDevice(targetDev.deviceId, targetDev.deviceName); }}
-                title={`Reopen all these tabs on ${targetDev.deviceName}`}
-                style={{ marginRight: '8px', padding: '6px 12px' }}
-              >
-                ⟳ {targetDev.deviceId === device.deviceId ? 'THIS DEVICE' : targetDev.deviceName.toUpperCase()}
-              </button>
-            ))}
+            <button
+              className={styles.restoreBtn}
+              onClick={(e) => { e.stopPropagation(); onShowDevicePicker(); }}
+              title="Restore all tabs to a target device"
+            >
+              ⟳ RESTORE TO DEVICE...
+            </button>
 
             <div style={{ flex: 1 }} />
 
