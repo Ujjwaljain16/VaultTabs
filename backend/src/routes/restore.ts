@@ -68,21 +68,27 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
 
     // 1. Initial Check: Immediately flush any pending request so the client
     // doesn't miss anything that occurred while offline.
-    const initialPending = await restoreService.getPendingWithSnapshot(userId, device_id);
-    if (initialPending) {
-      const payload = {
-        pending: true,
-        request: {
-          id: initialPending.id,
-          snapshot_id: initialPending.snapshot_id,
-          snapshot_iv: initialPending.snapshot_iv,
-          encrypted_blob: initialPending.encrypted_blob,
-          target_url: initialPending.target_url,
-          created_at: initialPending.created_at,
-          expires_at: initialPending.expires_at,
-        }
-      };
-      reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+    try {
+      const initialPending = await restoreService.getPendingWithSnapshot(userId, device_id);
+      if (initialPending) {
+        const payload = {
+          pending: true,
+          request: {
+            id: initialPending.id,
+            snapshot_id: initialPending.snapshot_id,
+            snapshot_iv: initialPending.snapshot_iv,
+            encrypted_blob: initialPending.encrypted_blob,
+            target_url: initialPending.target_url,
+            created_at: initialPending.created_at,
+            expires_at: initialPending.expires_at,
+          }
+        };
+        reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+      }
+    } catch (err) {
+      request.log.error(err, '[SSE Initialize Error]');
+      reply.raw.end();
+      return;
     }
 
     // 2. Heartbeat: Send a ping every 20 seconds to keep connection alive
@@ -94,22 +100,26 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
     // 3. Listen to the RestoreService events
     const eventName = `restore:${device_id}`;
     const onRestoreRequest = async (req: any) => {
-      // Re-fetch with snapshot blob since req from create() doesn't have the blob
-      const pending = await restoreService.getPendingWithSnapshot(userId, device_id);
-      if (pending && pending.id === req.id) {
-        const payload = {
-          pending: true,
-          request: {
-            id: pending.id,
-            snapshot_id: pending.snapshot_id,
-            snapshot_iv: pending.snapshot_iv,
-            encrypted_blob: pending.encrypted_blob,
-            target_url: pending.target_url,
-            created_at: pending.created_at,
-            expires_at: pending.expires_at,
-          }
-        };
-        reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+      try {
+        // Re-fetch with snapshot blob since req from create() doesn't have the blob
+        const pending = await restoreService.getPendingWithSnapshot(userId, device_id);
+        if (pending && pending.id === req.id) {
+          const payload = {
+            pending: true,
+            request: {
+              id: pending.id,
+              snapshot_id: pending.snapshot_id,
+              snapshot_iv: pending.snapshot_iv,
+              encrypted_blob: pending.encrypted_blob,
+              target_url: pending.target_url,
+              created_at: pending.created_at,
+              expires_at: pending.expires_at,
+            }
+          };
+          reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+        }
+      } catch (err) {
+        request.log.error(err, '[SSE Event Handler Error]');
       }
     };
 

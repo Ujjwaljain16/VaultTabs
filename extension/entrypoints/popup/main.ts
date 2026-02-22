@@ -380,12 +380,11 @@ function showRecoveryScreen(recoveryCode: string, email: string) {
 
   // Copy button
   const copyBtn = el('btn-copy-recovery');
-  const copyLabel = el('copy-label');
   copyBtn.addEventListener('click', async () => {
     await navigator.clipboard.writeText(recoveryCode);
-    copyLabel.textContent = '✓ Copied';
+    copyBtn.textContent = '✓ COPIED';
     copyBtn.style.color = 'var(--accent)';
-    setTimeout(() => { copyLabel.textContent = 'Copy'; copyBtn.style.color = ''; }, 2000);
+    setTimeout(() => { copyBtn.textContent = 'COPY'; copyBtn.style.color = ''; }, 2000);
   });
 
   // Download button — creates a .txt file with the code
