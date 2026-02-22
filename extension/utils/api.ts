@@ -190,6 +190,14 @@ export async function apiHeartbeat(deviceId: string) {
   });
 }
 
+/** Rename a device */
+export async function apiRenameDevice(deviceId: string, name: string) {
+  return apiFetch<{ message: string; device: any }>(`/account/devices/${deviceId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ device_name: name })
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SNAPSHOT ENDPOINTS
 // ─────────────────────────────────────────────────────────────────────────────

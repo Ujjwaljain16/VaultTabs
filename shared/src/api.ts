@@ -2,7 +2,7 @@
  * Shared API request/response types.
  */
 
-import { User, Device, Snapshot, RestoreRequest } from './models.js';
+import { User, Device, Checkpoint, RestoreRequest, Workspace, OperationType } from './models.js';
 
 export interface RegisterPayload {
     email: string;
@@ -33,7 +33,7 @@ export interface DeviceResponse {
     device: Device;
 }
 
-export interface SnapshotWithDevice extends Snapshot {
+export interface SnapshotWithDevice extends Checkpoint {
     device_name: string;
     last_seen: string | Date;
 }
@@ -43,7 +43,7 @@ export interface SnapshotsResponse {
 }
 
 export interface SnapshotResponse {
-    snapshot: Snapshot;
+    snapshot: Checkpoint;
 }
 
 export interface SnapshotHistoryResponse {
@@ -85,8 +85,9 @@ export interface AccountDevicesResponse {
     devices: AccountDevice[];
 }
 export interface UploadSnapshotPayload {
-    device_id: string;
+    workspace_id: string;
     captured_at: string | Date;
+    version: number;
     iv: string;
     encrypted_blob: string;
 }
@@ -99,4 +100,35 @@ export interface PendingRestoreResponse {
 export interface CompleteRestorePayload {
     status: 'completed' | 'failed';
     error_msg?: string;
+}
+export interface WorkspaceResponse {
+    workspace: Workspace;
+}
+
+export interface WorkspacesResponse {
+    workspaces: Workspace[];
+}
+
+export interface CreateWorkspacePayload {
+    name: string;
+    description?: string;
+}
+
+export interface OpLogPayload {
+    workspace_id: string;
+    operations: {
+        id: string; // Unique UUID for idempotency
+        sequence_id: number;
+        base_version: number;
+        operation: OperationType;
+        payload_iv: string;
+        encrypted_payload: string;
+        timestamp: string | Date;
+    }[];
+}
+
+export interface OpLogResponse {
+    success: boolean;
+    last_sequence_id: number;
+    current_version: number;
 }

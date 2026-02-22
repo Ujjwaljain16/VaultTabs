@@ -25,7 +25,7 @@ import {
 } from '../../utils/storage';
 
 import {
-  apiRegister, apiLogin, apiRegisterDevice, getDeviceName,
+  apiRegister, apiLogin, apiRegisterDevice, apiRenameDevice, getDeviceName,
 } from '../../utils/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -65,6 +65,11 @@ async function init() {
   const storage = await loadFromStorage();
 
   if (!storage.is_logged_in || !storage.jwt_token) {
+    // Pre-fill device name for registration/login
+    const defaultName = getDeviceName();
+    el<HTMLInputElement>('reg-device-name').value = defaultName;
+    el<HTMLInputElement>('login-device-name').value = defaultName;
+
     showScreen('screen-auth');
     return;
   }
@@ -288,6 +293,7 @@ async function handleRegister(e: Event) {
   const email = el<HTMLInputElement>('reg-email').value.trim();
   const password = el<HTMLInputElement>('reg-password').value;
   const confirm = el<HTMLInputElement>('reg-password-confirm').value;
+  const deviceName = el<HTMLInputElement>('reg-device-name').value.trim() || getDeviceName();
   const btn = el<HTMLButtonElement>('btn-register');
 
   if (password !== confirm) { showError('reg-error', 'Passwords do not match.'); return; }
@@ -325,10 +331,10 @@ async function handleRegister(e: Event) {
     await saveToStorage({ jwt_token: token, user_id: user.id, user_email: user.email });
     const existing = await loadFromStorage();
     let deviceId = existing.device_id;
-    const deviceName = existing.device_name || getDeviceName();
+    const finalDeviceName = deviceName || existing.device_name || getDeviceName();
 
     if (!deviceId) {
-      const deviceResult = await apiRegisterDevice(deviceName);
+      const deviceResult = await apiRegisterDevice(finalDeviceName);
       if (!deviceResult.ok || !deviceResult.data) {
         showError('reg-error', 'Account created but device registration failed. Please login.');
         return;
@@ -339,7 +345,7 @@ async function handleRegister(e: Event) {
     // 5. Persist session
     await saveToStorage({
       jwt_token: token, user_id: user.id, user_email: user.email,
-      device_id: deviceId, device_name: deviceName,
+      device_id: deviceId, device_name: finalDeviceName,
       is_logged_in: true, sync_count: 0,
     });
     await saveMasterKey(masterKey);
@@ -433,11 +439,12 @@ async function handleLogin(e: Event) {
 
   const email = el<HTMLInputElement>('login-email').value.trim();
   const password = el<HTMLInputElement>('login-password').value;
+  const deviceName = el<HTMLInputElement>('login-device-name').value.trim() || getDeviceName();
   const btn = el<HTMLButtonElement>('btn-login');
 
   setLoading(btn, true);
   try {
-    await doLogin(email, password, 'login-error');
+    await doLogin(email, password, 'login-error', deviceName);
   } finally {
     setLoading(btn, false);
   }
@@ -457,7 +464,9 @@ async function handleRelogin(e: Event) {
 
   setLoading(btn, true);
   try {
-    await doLogin(email, password, 'relogin-error');
+    // Relogin implies we already have a device_id in storage
+    const storage = await loadFromStorage();
+    await doLogin(email, password, 'relogin-error', storage.device_name);
   } finally {
     setLoading(btn, false);
   }
@@ -471,7 +480,7 @@ async function handleRelogin(e: Event) {
  * 4. Register as a device
  * 5. Save everything + show dashboard
  */
-async function doLogin(email: string, password: string, errorElId: string) {
+async function doLogin(email: string, password: string, errorElId: string, customDeviceName?: string) {
   const result = await apiLogin(email, password);
   if (!result.ok || !result.data) {
     showError(errorElId, result.error || 'Login failed. Check email and password.');
@@ -503,7 +512,7 @@ async function doLogin(email: string, password: string, errorElId: string) {
   //   2. Register new device (first login on this browser)
   const existing = await loadFromStorage();
   let deviceId = existing.device_id;
-  let deviceName = existing.device_name || getDeviceName();
+  let deviceName = customDeviceName || existing.device_name || getDeviceName();
 
   if (!deviceId) {
     // First time on this browser — register a new device
@@ -579,6 +588,62 @@ chrome.runtime.onMessage.addListener((message) => {
     if (dashboard && !dashboard.classList.contains('hidden')) refreshDashboard();
   }
 });
+
+// ── RENAME DEVICE ────────────────────────────────────────────────────────────
+
+el('stat-device-box').addEventListener('click', async () => {
+  const storage = await loadFromStorage();
+  const input = el<HTMLInputElement>('rename-input');
+  input.value = storage.device_name || '';
+  el('rename-overlay').classList.remove('hidden');
+  hideError('rename-error');
+  input.focus();
+});
+
+el('btn-cancel-rename').addEventListener('click', () => {
+  el('rename-overlay').classList.add('hidden');
+});
+
+el('btn-save-rename').addEventListener('click', handleRenameDevice);
+
+el('rename-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') handleRenameDevice();
+  if (e.key === 'Escape') el('rename-overlay').classList.add('hidden');
+});
+
+async function handleRenameDevice() {
+  const input = el<HTMLInputElement>('rename-input');
+  const newName = input.value.trim();
+  if (!newName) return;
+
+  const btn = el<HTMLButtonElement>('btn-save-rename');
+  const storage = await loadFromStorage();
+  const deviceId = storage.device_id;
+
+  if (!deviceId) return;
+
+  setLoading(btn, true);
+  hideError('rename-error');
+
+  try {
+    const result = await apiRenameDevice(deviceId, newName);
+    if (!result.ok) {
+      showError('rename-error', result.error || 'Failed to rename device');
+      return;
+    }
+
+    // Update local storage and UI
+    await saveToStorage({ device_name: newName });
+    el('info-device').textContent = newName.length > 7
+      ? newName.slice(0, 6) + '…' : newName;
+    el('rename-overlay').classList.add('hidden');
+
+  } catch (err) {
+    showError('rename-error', 'An unexpected error occurred');
+  } finally {
+    setLoading(btn, false);
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // START

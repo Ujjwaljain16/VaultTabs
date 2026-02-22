@@ -42,6 +42,10 @@
           <input type="password" id="reg-password" placeholder="Min 8 characters" required minlength="8" />
         </div>
         <div class="field">
+          <label for="reg-device-name">Device Name (Optional)</label>
+          <input type="text" id="reg-device-name" placeholder="e.g. Home PC" />
+        </div>
+        <div class="field">
           <label for="reg-password-confirm">Confirm Password</label>
           <input type="password" id="reg-password-confirm" placeholder="Same password again" required />
         </div>
@@ -60,8 +64,12 @@
           <input type="email" id="login-email" placeholder="you@example.com" required />
         </div>
         <div class="field">
-          <label for="login-password">Password</label>
+          <label for="login-password">Your Password</label>
           <input type="password" id="login-password" placeholder="Your password" required />
+        </div>
+        <div class="field">
+          <label for="login-device-name">Device Name (Optional)</label>
+          <input type="text" id="login-device-name" placeholder="e.g. Work Laptop" />
         </div>
         <div id="login-error" class="error-msg hidden"></div>
         <button type="submit" id="btn-login" class="btn-primary">
@@ -110,9 +118,22 @@
           <div class="stat-value" id="info-window-count">—</div>
           <div class="stat-label">Windows</div>
         </div>
-        <div class="stat-box">
+        <div class="stat-box" id="stat-device-box" title="Click to rename device">
           <div class="stat-value" id="info-device">—</div>
-          <div class="stat-label">Device</div>
+          <div class="stat-label">Device <span class="edit-icon">✎</span></div>
+        </div>
+      </div>
+
+      <!-- Rename device semi-modal (hidden by default) -->
+      <div id="rename-overlay" class="overlay hidden">
+        <div class="overlay-content">
+          <p class="overlay-title">Rename Device</p>
+          <input type="text" id="rename-input" placeholder="e.g. Work PC" />
+          <div id="rename-error" class="error-msg hidden"></div>
+          <div class="overlay-buttons">
+            <button id="btn-cancel-rename" class="btn-secondary">Cancel</button>
+            <button id="btn-save-rename" class="btn-primary">Save</button>
+          </div>
         </div>
       </div>
 

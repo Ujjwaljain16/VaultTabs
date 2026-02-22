@@ -385,3 +385,78 @@ input::placeholder { color: var(--text-muted); }
   accent-color: var(--accent);
   flex-shrink: 0;
 }
+
+#stat-device-box {
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.1s;
+}
+#stat-device-box:hover {
+  border-color: var(--accent);
+}
+#stat-device-box:active {
+  transform: scale(0.97);
+}
+.edit-icon {
+  font-size: 8px;
+  vertical-align: middle;
+  margin-left: 2px;
+  opacity: 0.6;
+}
+
+/* ── OVERLAY (Semi-modal) ─────────────────────── */
+.overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+.overlay-content {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  width: 100%;
+  max-width: 280px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+}
+.overlay-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 12px;
+  text-align: center;
+}
+.overlay-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 15px;
+}
+.btn-secondary {
+  background: var(--bg-input);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  flex: 1;
+}
+.btn-secondary:hover {
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+#rename-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 13px;
+  width: 100%;
+  outline: none;
+}
+#rename-input:focus {
+  border-color: var(--accent);
+}
