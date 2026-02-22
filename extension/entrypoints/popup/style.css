@@ -511,9 +511,6 @@ input::placeholder { color: var(--text-3); }
   border-color: var(--text-2);
   color: var(--text);
 }
-#rename-input {
-  /* Inherits from standard input */
-}
 
 /* Toast */
 .restore-toast {
