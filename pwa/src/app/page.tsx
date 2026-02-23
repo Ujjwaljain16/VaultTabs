@@ -72,7 +72,10 @@ export default function RootPage() {
           {isLoggedIn ? (
             <button className={styles.navBtnPrimary} onClick={() => router.push('/dashboard')}>Dashboard</button>
           ) : (
-            <button className={styles.navBtnPrimary} onClick={() => router.push('/login')}>Login</button>
+            <>
+              <button className={styles.navBtn} onClick={() => router.push('/login')}>Login</button>
+              <button className={styles.navBtnPrimary} onClick={() => router.push('/register')}>Register</button>
+            </>
           )}
         </div>
       </nav>
@@ -106,11 +109,11 @@ export default function RootPage() {
               </button>
             ) : (
               <>
-                <button className={styles.btnPrimary} onClick={() => router.push('/login')}>
-                  Get Started Free
+                <button className={styles.btnPrimary} onClick={() => window.open('https://github.com/Ujjwaljain16/VaultTabs', '_blank')}>
+                  Download Extension
                 </button>
-                <button className={styles.btnSecondary} onClick={() => window.open('https://github.com/Ujjwaljain16/VaultTabs', '_blank')}>
-                  View architecture
+                <button className={styles.btnSecondary} onClick={() => router.push('/register')}>
+                  Create Account
                 </button>
               </>
             )}
@@ -208,6 +211,32 @@ export default function RootPage() {
         </div>
       </section>
 
+      {/* HOW IT WORKS */}
+      <section className={styles.howItWorksSection}>
+        <div className={styles.howItWorksHeader}>
+          <div className={`${styles.badge} ${styles.reveal}`}>Simple Flow</div>
+          <h2 className={`${styles.title} ${styles.reveal}`}>How VaultTabs Works</h2>
+        </div>
+
+        <div className={styles.stepsGrid}>
+          <div className={`${styles.stepCard} ${styles.reveal}`}>
+            <div className={styles.stepNumber}>01</div>
+            <h3>Install the Extension</h3>
+            <p>Add VaultTabs to Chrome, Brave, or Edge. It runs silently in the background.</p>
+          </div>
+          <div className={`${styles.stepCard} ${styles.reveal}`}>
+            <div className={styles.stepNumber}>02</div>
+            <h3>Create an Account</h3>
+            <p>Your password generates a local Master Key. Your tabs are encrypted before leaving the browser.</p>
+          </div>
+          <div className={`${styles.stepCard} ${styles.reveal}`}>
+            <div className={styles.stepNumber}>03</div>
+            <h3>Sync & Teleport</h3>
+            <p>Access your securely synced tabs from any device via the PWA, or push tabs directly to specific screens.</p>
+          </div>
+        </div>
+      </section>
+
       {/* SECURITY GRID */}
       <section className={styles.securitySection}>
         <div className={`${styles.badge} ${styles.reveal}`}>Security Built-In</div>
@@ -252,9 +281,14 @@ export default function RootPage() {
               Go to Dashboard
             </button>
           ) : (
-            <button className={styles.btnPrimary} style={{ margin: '0 auto' }} onClick={() => router.push('/login')}>
-              Create Secure Account
-            </button>
+            <div className={styles.ctaButtons}>
+              <button className={styles.btnPrimary} onClick={() => window.open('https://github.com/Ujjwaljain16/VaultTabs', '_blank')}>
+                Download Extension
+              </button>
+              <button className={styles.btnSecondary} onClick={() => router.push('/register')}>
+                Register Account
+              </button>
+            </div>
           )}
         </div>
       </footer>

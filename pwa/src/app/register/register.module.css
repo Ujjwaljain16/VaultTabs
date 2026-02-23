@@ -1,0 +1,231 @@
+/* Login page — terminal vault aesthetic */
+
+.root {
+  min-height: 100dvh;
+  background: var(--black);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Subtle scan line sweep */
+.scanline {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 120px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgba(57, 255, 133, 0.015),
+    transparent
+  );
+  animation: scan 8s linear infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes scan {
+  from { transform: translateY(-120px); }
+  to   { transform: translateY(100vh); }
+}
+
+.container {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  position: relative;
+  z-index: 1;
+  animation: fadeIn 0.4s ease forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Logo ─────────────────────────────────────── */
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logoName {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.logoSub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-top: 1px;
+}
+
+/* ── Terminal log ─────────────────────────────── */
+.terminal {
+  background: var(--black-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-sm);
+  padding: 12px 14px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--green-dim);
+  line-height: 1.8;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.termLine {
+  display: flex;
+  gap: 8px;
+}
+
+.termPrefix {
+  color: var(--green);
+  user-select: none;
+}
+
+.cursor {
+  color: var(--green);
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+/* ── Form ─────────────────────────────────────── */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-3);
+  letter-spacing: 0.12em;
+}
+
+.input {
+  background: var(--black-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 10px 12px;
+  outline: none;
+  width: 100%;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.input::placeholder { color: var(--text-3); }
+
+.input:focus {
+  border-color: var(--green-border);
+  box-shadow: 0 0 0 3px rgba(57, 255, 133, 0.06);
+}
+
+.input:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Error ────────────────────────────────────── */
+.error {
+  background: var(--error-dim);
+  border: 1px solid rgba(255, 94, 94, 0.2);
+  color: var(--error);
+  border-radius: var(--r-sm);
+  padding: 9px 12px;
+  font-size: 12.5px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.4;
+}
+
+.errorIcon {
+  font-size: 10px;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+/* ── Button ───────────────────────────────────── */
+.btn {
+  background: var(--green);
+  color: #050f08;
+  border: none;
+  border-radius: var(--r-sm);
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  width: 100%;
+  transition: opacity 0.15s, transform 0.1s, box-shadow 0.2s;
+}
+
+.btn:hover:not(:disabled) {
+  opacity: 0.9;
+  box-shadow: var(--green-glow);
+}
+
+.btn:active:not(:disabled) { transform: scale(0.98); }
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: var(--green-dim);
+}
+
+/* ── ZK note ──────────────────────────────────── */
+.zkNote {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.5;
+  padding: 10px 12px;
+  background: var(--black-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+
+.zkIcon {
+  color: var(--green);
+  font-size: 13px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.forgotLink {
+  display: block;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+  text-decoration: none;
+  margin-top: 2px;
+  transition: color 0.15s;
+}
+.forgotLink:hover { color: var(--green-dim); }

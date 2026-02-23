@@ -69,6 +69,13 @@ export {
 
 // ─── Endpoints ────────────────────────────────────────────────────────────────
 
+export function apiRegister(payload: any) {
+  return apiFetch<LoginResponse>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function apiLogin(email: string, password: string) {
   return apiFetch<LoginResponse>('/auth/login', {
     method: 'POST',
