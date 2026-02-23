@@ -177,6 +177,18 @@
       <div id="restore-toast" class="restore-toast hidden">
         <span id="restore-toast-text">✓ Session restored!</span>
       </div>
+
+      <!-- Device picker for "Send to Device" -->
+      <div id="device-picker-overlay" class="overlay hidden">
+        <div class="overlay-content">
+          <p class="overlay-title">Send Tab To...</p>
+          <p class="overlay-desc">Select a device to open this tab on:</p>
+          <div id="device-picker-list" class="device-picker-list">
+            <!-- Populated via JS -->
+          </div>
+          <button id="btn-cancel-device-picker" class="btn-secondary">Cancel</button>
+        </div>
+      </div>
     </div>
 
     <!-- ── RECOVERY KEY ──────────────────────────────────────── -->

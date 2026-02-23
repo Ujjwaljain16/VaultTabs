@@ -30,6 +30,9 @@ import {
 type PendingRestoreRequestDetail = NonNullable<PendingRestoreResponse['request']>;
 export type { PendingRestoreRequestDetail as PendingRestoreRequest };
 
+import { type Device, type RestoreRequest } from '@vaulttabs/shared';
+export type { Device, RestoreRequest };
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CONFIG
 // Change API_BASE_URL to your production URL when you deploy the backend
@@ -198,6 +201,11 @@ export async function apiRenameDevice(deviceId: string, name: string) {
   });
 }
 
+/** Get all registered devices for this user */
+export async function apiGetDevices() {
+  return apiFetch<{ devices: Device[] }>('/devices');
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SNAPSHOT ENDPOINTS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -236,6 +244,21 @@ export async function apiCompleteRestore(
     `/restore/${requestId}`,
     {
       method: 'PATCH',
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+/** Create a new restore request (send tab/snapshot to another device) */
+export async function apiCreateRestoreRequest(payload: {
+  target_device_id: string;
+  snapshot_id?: string;
+  target_url?: string;
+}) {
+  return apiFetch<{ message: string; request_id: string; status: string; expires_at: string }>(
+    '/restore',
+    {
+      method: 'POST',
       body: JSON.stringify(payload),
     }
   );

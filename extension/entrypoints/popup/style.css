@@ -507,9 +507,80 @@ input::placeholder { color: var(--text-3); }
   text-transform: uppercase;
   transition: all 0.15s;
 }
-.btn-secondary:hover {
-  border-color: var(--text-2);
-  color: var(--text);
+.btn-secondary:active { transform: translateY(1px); }
+
+/* ── DEVICE PICKER LIST ───────────────────────── */
+.overlay-desc {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.device-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 16px;
+}
+
+.picker-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--black-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  transition: all 0.15s;
+}
+
+.picker-item:hover {
+  background: var(--black-4);
+  border-color: var(--green-border);
+  color: var(--green);
+}
+
+.picker-icon {
+  color: var(--green-dim);
+  font-size: 14px;
+}
+
+/* ── SEND TAB BUTTON ──────────────────────────── */
+.btn-send-tab {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.tab-item:hover .btn-send-tab {
+  color: var(--text-2);
+}
+
+.btn-send-tab:hover {
+  background: var(--green-muted);
+  color: var(--green) !important;
+}
+
+.btn-send-tab svg {
+  width: 14px;
+  height: 14px;
 }
 
 /* Toast */

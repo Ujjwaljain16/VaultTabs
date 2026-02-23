@@ -26,6 +26,7 @@ import {
 
 import {
   apiRegister, apiLogin, apiRegisterDevice, apiRenameDevice, getDeviceName,
+  apiGetDevices, apiCreateRestoreRequest, type Device
 } from '../../utils/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -55,6 +56,10 @@ function setLoading(btn: HTMLButtonElement, loading: boolean) {
   btn.querySelector('.btn-text')?.classList.toggle('hidden', loading);
   btn.querySelector('.btn-loading')?.classList.toggle('hidden', !loading);
 }
+
+let currentTabs: chrome.tabs.Tab[] = [];
+let pendingSendUrl: string | null = null;
+let userDevices: Device[] = [];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INIT — runs once when popup opens
@@ -248,6 +253,22 @@ function renderTabList(tabs: chrome.tabs.Tab[]) {
 
     item.appendChild(faviconEl);
     item.appendChild(info);
+
+    // Send to Device button
+    const sendBtn = document.createElement('button');
+    sendBtn.className = 'btn-send-tab';
+    sendBtn.title = 'Send to another device';
+    sendBtn.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>
+      </svg>
+    `;
+    sendBtn.onclick = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      showDevicePicker(tab.url || '');
+    };
+    item.appendChild(sendBtn);
 
     // Green dot for the active tab
     if (tab.active) {
@@ -605,6 +626,11 @@ el('btn-cancel-rename').addEventListener('click', () => {
   el('rename-overlay').classList.add('hidden');
 });
 
+el('btn-cancel-device-picker').addEventListener('click', () => {
+  el('device-picker-overlay').classList.add('hidden');
+  pendingSendUrl = null;
+});
+
 el('btn-save-rename').addEventListener('click', handleRenameDevice);
 
 el('rename-input').addEventListener('keydown', (e) => {
@@ -644,6 +670,77 @@ async function handleRenameDevice() {
   } finally {
     setLoading(btn, false);
   }
+}
+
+/** ── SEND TO DEVICE ───────────────────────────────────────────────────────── */
+
+async function showDevicePicker(url: string) {
+  if (!url) return;
+  pendingSendUrl = url;
+
+  const listEl = el('device-picker-list');
+  listEl.innerHTML = '<div class="spinner" style="margin: 20px auto;"></div>';
+  el('device-picker-overlay').classList.remove('hidden');
+
+  const result = await apiGetDevices();
+  if (!result.ok || !result.data) {
+    listEl.innerHTML = `<div class="error-msg">${result.error || 'Failed to load devices'}</div>`;
+    return;
+  }
+
+  const storage = await loadFromStorage();
+  const currentDeviceId = storage.device_id;
+
+  // Filter out the current device
+  userDevices = result.data.devices.filter(d => d.id !== currentDeviceId);
+
+  if (userDevices.length === 0) {
+    listEl.innerHTML = `
+      <div class="tab-list-empty" style="padding: 10px;">
+        No other devices found. Register VaultTabs on another browser to send tabs!
+      </div>
+    `;
+    return;
+  }
+
+  listEl.innerHTML = '';
+  userDevices.forEach(device => {
+    const btn = document.createElement('button');
+    btn.className = 'picker-item';
+    btn.innerHTML = `
+      <span class="picker-icon">◉</span>
+      <div class="picker-name">${device.device_name}</div>
+    `;
+    btn.onclick = () => handleSendToDevice(device.id, url);
+    listEl.appendChild(btn);
+  });
+}
+
+async function handleSendToDevice(targetDeviceId: string, url: string) {
+  const listEl = el('device-picker-list');
+  listEl.innerHTML = '<div class="spinner" style="margin: 20px auto;"></div>';
+
+  const result = await apiCreateRestoreRequest({
+    target_device_id: targetDeviceId,
+    target_url: url
+  });
+
+  if (!result.ok) {
+    alert('Failed to send tab: ' + (result.error || 'Unknown error'));
+    showDevicePicker(url); // show picker again
+    return;
+  }
+
+  el('device-picker-overlay').classList.add('hidden');
+  showToast('✓ Tab sent!');
+  pendingSendUrl = null;
+}
+
+function showToast(text: string) {
+  const toast = el('restore-toast');
+  el('restore-toast-text').innerText = text;
+  toast.classList.remove('hidden');
+  setTimeout(() => toast.classList.add('hidden'), 3000);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
