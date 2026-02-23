@@ -84,18 +84,18 @@ export default function RootPage() {
         <div className={`${styles.heroContent} ${styles.reveal}`}>
           <div className={styles.badge}>
             <div className={styles.badgePulse}></div>
-            Military-Grade Encryption
+            Zero-Knowledge Architecture
           </div>
 
           <h1 className={styles.title}>
             Your Tabs. Everywhere.<br />
-            <span className={styles.titleHighlight}>Fully Encrypted.</span>
+            <span className={styles.titleHighlight}>Entirely Private.</span>
           </h1>
 
           <p className={styles.description}>
-            Sync your workspaces perfectly across laptops, desktops, and phones.
-            Send tabs instantly between devices without lifting a finger. Built on
-            Zero-Knowledge architecture—we never see your data.
+            Seamlessly sync your active workspaces across all your devices.
+            Send specific tabs instantly where you need them. Secure, fast,
+            and entirely private—we never see your data.
           </p>
 
           <div className={styles.ctas}>
@@ -157,10 +157,12 @@ export default function RootPage() {
 
           <div className={`${styles.featureRow} ${styles.reveal}`}>
             <div className={styles.featureText}>
-              <div className={styles.featureSubtitle}>Real-Time Flow</div>
-              <h2 className={styles.featureTitle}>Synchronize at the speed of thought.</h2>
+              <div className={styles.featureSubtitle}>Continuous Sync</div>
+              <h2 className={styles.featureTitle}>Pick up exactly where you left off.</h2>
               <p className={styles.featureDesc}>
-                Our lightweight background engine updates your dashboard the split second you open, close, or switch tabs. Leave work on your laptop, and pick up exactly where you left off on your desktop.
+                A lightweight engine silently updates your state across devices.
+                Whether you switch from laptop to desktop, your tabs are right
+                there waiting for you. No manual refreshing required.
               </p>
             </div>
             <div className={styles.featureVisual}>
@@ -211,7 +213,7 @@ export default function RootPage() {
         <div className={`${styles.badge} ${styles.reveal}`}>Security Built-In</div>
         <h2 className={`${styles.title} ${styles.reveal}`} style={{ fontSize: 'clamp(32px, 5vw, 56px)' }}>Zero-Knowledge Protocol</h2>
         <p className={`${styles.description} ${styles.reveal}`} style={{ margin: '0 auto' }}>
-          Your browsing history is the most sensitive data you own. <br />That's why our servers physically cannot read it.
+          Your browsing habits are deeply personal. <br />Our architecture ensures your data remains encrypted and inaccessible to anyone—even us.
         </p>
 
         <div className={styles.secGrid}>
@@ -244,7 +246,7 @@ export default function RootPage() {
       {/* FINAL CTA */}
       <footer className={styles.footerCta}>
         <div className={`${styles.reveal}`}>
-          <h2>Ready to upgrade your workflow?</h2>
+          <h2>Ready for a better browsing experience?</h2>
           {isLoggedIn ? (
             <button className={styles.btnPrimary} style={{ margin: '0 auto' }} onClick={() => router.push('/dashboard')}>
               Go to Dashboard
