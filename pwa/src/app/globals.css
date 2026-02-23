@@ -55,20 +55,20 @@ html {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  /* Prevent iOS bounce scroll */
-  overflow: hidden;
+  /* Prevent horizontal bounce but allow vertical scroll */
+  overflow-x: hidden;
   height: 100%;
 }
 
 body {
   height: 100%;
-  overflow: hidden;
+  overflow-x: hidden;
   background: var(--black);
 }
 
 #__next {
   height: 100%;
-  overflow: hidden;
+  overflow-x: hidden;
 }
 
 /* ── SCROLLBARS ─────────────────────────────────── */

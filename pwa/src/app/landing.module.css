@@ -10,17 +10,23 @@
 /* NAVBAR */
 .navbar {
   position: fixed;
-  top: 0; left: 0; right: 0;
-  height: 70px;
+  top: 24px; 
+  left: 50%;
+  transform: translateX(-50%);
+  height: 60px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 5%;
-  background: rgba(8, 8, 8, 0.7);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid rgba(57, 255, 133, 0.1);
+  padding: 0 24px;
+  background: rgba(20, 20, 20, 0.65);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 100px;
   z-index: 1000;
+  width: 90%;
+  max-width: 900px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(57, 255, 133, 0.05);
   transition: all 0.3s ease;
 }
 
