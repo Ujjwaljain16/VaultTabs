@@ -1,82 +1,34 @@
 /**
  * src/db/migrate.ts
- *
- * This script creates all the database tables.
- * Run it once with: npm run db:migrate
- *
- * TABLES WE CREATE:
- *
- * 1. users
- *    - Stores account info
- *    - encrypted_master_key = the user's master key, encrypted with their password
- *    - master_key_iv = the IV (initialization vector) used during encryption
- *    - salt = random bytes used during PBKDF2 key derivation (not secret)
- *
- * 2. devices
- *    - Each browser install registers as a device
- *    - Lets you see "MacBook Chrome", "Work Firefox", etc.
- *
- * 3. snapshots
- *    - Encrypted tab state blobs
- *    - We don't store URLs, titles, or any readable data here
- *    - Just: who sent it, when, and the encrypted blob
- *
- * IMPORTANT: This script is safe to run multiple times.
- * We use "CREATE TABLE IF NOT EXISTS" so it won't crash if tables already exist.
+ * Creates necessary database tables for VaultTabs.
  */
 
 import sql from './client.js';
 
 async function migrate() {
-  console.log('🔧 Running database migrations...\n');
+  console.log('[*] Running database migrations...\n');
 
   try {
-    // ─── TABLE 1: users ──────────────────────────────────────────────────────
+    // ── Users Table ──
     await sql`
       CREATE TABLE IF NOT EXISTS users (
         id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         email               TEXT UNIQUE NOT NULL,
-
-        -- Password is NEVER stored. We store a bcrypt hash instead.
-        -- Actually in our zero-knowledge model, we don't even store the hash —
-        -- we use a different approach: the encrypted_master_key itself proves
-        -- you know the password (if decryption works, password was correct).
-        -- But for login convenience, we store a password hash for quick auth.
         password_hash       TEXT NOT NULL,
-
-        -- The user's master key, encrypted with their password-derived key.
-        -- This is a hex string of the encrypted bytes.
-        -- Server cannot read this without knowing the password.
         encrypted_master_key TEXT NOT NULL,
-
-        -- The IV (Initialization Vector) used when encrypting the master key.
-        -- AES-GCM requires a unique IV per encryption. It's not secret.
         master_key_iv       TEXT NOT NULL,
-
-        -- Random salt used in PBKDF2 key derivation.
-        -- Stored so we can re-derive the wrapping key during login.
-        -- Not secret — just prevents rainbow table attacks.
         salt                TEXT NOT NULL,
-
-        -- ── Recovery key (Phase 4) ────────────────────────────────────────────
-        -- A second copy of the master key encrypted with a recovery code.
-        -- Shown ONCE at registration. Never stored in plaintext.
-        -- If user forgets password, recovery code → decrypt → re-encrypt with new password.
         recovery_encrypted_master_key TEXT,
         recovery_key_iv               TEXT,
         recovery_key_salt             TEXT,
-        recovery_key_hash             TEXT,  -- scrypt hash of recovery code for verification
-
-        -- How many snapshots to retain per device (default 50, user can change)
+        recovery_key_hash             TEXT,
         snapshot_retention  INTEGER NOT NULL DEFAULT 50,
-
         created_at          TIMESTAMPTZ DEFAULT NOW() NOT NULL,
         updated_at          TIMESTAMPTZ DEFAULT NOW() NOT NULL
       );
     `;
-    console.log('✅ Table "users" ready');
+    console.log('[+] Table "users" ready');
 
-    // Ensure snapshot_retention and recovery columns exist for older tables
     await sql`
       ALTER TABLE users 
         ADD COLUMN IF NOT EXISTS snapshot_retention INTEGER NOT NULL DEFAULT 50,
@@ -86,142 +38,78 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS recovery_key_hash TEXT;
     `;
 
-    // ─── TABLE 2: devices ─────────────────────────────────────────────────────
+    // ── Devices Table ──
     await sql`
       CREATE TABLE IF NOT EXISTS devices (
         id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-
-        -- Human-readable name shown in the UI (e.g. "MacBook Chrome")
         device_name TEXT NOT NULL,
-
-        -- We track when we last received a snapshot from this device
+        fingerprint TEXT,
         last_seen   TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-
         created_at  TIMESTAMPTZ DEFAULT NOW() NOT NULL
       );
     `;
-    console.log('✅ Table "devices" ready');
+    console.log('[+] Table "devices" ready');
 
-    // ─── TABLE 3: snapshots ──────────────────────────────────────────────────
+    await sql`
+      ALTER TABLE devices 
+        ADD COLUMN IF NOT EXISTS fingerprint TEXT;
+    `;
+    console.log('[+] Column "fingerprint" in devices ready');
+
+    // ── Snapshots Table ──
     await sql`
       CREATE TABLE IF NOT EXISTS snapshots (
         id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         device_id    UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-
-        -- When this snapshot was taken (set by the client, not server)
         captured_at  TIMESTAMPTZ NOT NULL,
-
-        -- The IV used when encrypting this snapshot blob.
-        -- Every snapshot needs a fresh IV — we generate one per snapshot.
         iv           TEXT NOT NULL,
-
-        -- The actual encrypted tab data. Stored as base64 string.
-        -- Could be stored in Cloudflare R2 for large blobs (Phase 2).
         encrypted_blob TEXT NOT NULL,
-
         created_at   TIMESTAMPTZ DEFAULT NOW() NOT NULL
       );
     `;
-    console.log('✅ Table "snapshots" ready');
+    console.log('[+] Table "snapshots" ready');
 
-    // ─── INDEX for fast queries ───────────────────────────────────────────────
-    // When the mobile app asks for latest snapshots per device,
-    // this index makes that query fast.
-    await sql`
-      CREATE INDEX IF NOT EXISTS idx_snapshots_user_device
-        ON snapshots(user_id, device_id, captured_at DESC);
-    `;
-    console.log('✅ Index on snapshots ready');
+    // ── Indexes ──
+    await sql`CREATE INDEX IF NOT EXISTS idx_snapshots_user_device ON snapshots(user_id, device_id, captured_at DESC);`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id);`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_snapshots_device_captured ON snapshots(device_id, captured_at DESC);`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_snapshots_user_captured ON snapshots(user_id, captured_at DESC);`;
+    console.log('[+] Indexes ready');
 
-    // ─── INDEX for device lookups ─────────────────────────────────────────────
-    await sql`
-      CREATE INDEX IF NOT EXISTS idx_devices_user
-        ON devices(user_id);
-    `;
-    console.log('✅ Index on devices ready');
-
-    // ─── EXTRA PERFORMANCE INDEXES ──────────────────────────────────────────
-    await sql`
-      CREATE INDEX IF NOT EXISTS idx_snapshots_device_captured
-        ON snapshots(device_id, captured_at DESC);
-    `;
-    await sql`
-      CREATE INDEX IF NOT EXISTS idx_snapshots_user_captured
-        ON snapshots(user_id, captured_at DESC);
-    `;
-    console.log('✅ Performance indexes on snapshots ready');
-
-    // ─── TABLE 4: restore_requests ────────────────────────────────────────────
-    // Phase 3: PWA sends a restore request targeting a specific device.
-    // The extension polls for pending requests and opens the tabs locally.
-    //
-    // HOW IT WORKS:
-    // 1. User taps "Restore to Desktop" on PWA (targets device X)
-    // 2. PWA posts to /restore with the snapshot_id and target device_id
-    // 3. Backend stores the request with status "pending"
-    // 4. Extension polls GET /restore/pending every 5 seconds
-    // 5. Extension finds the request, decrypts the snapshot, opens tabs
-    // 6. Extension marks the request "completed"
-    // 7. PWA polls GET /restore/:id and shows "Session restored!" when completed
-    //
-    // WHY NOT WEBSOCKETS?
-    // Service workers can't hold WebSocket connections.
-    // Short polling (5s) is simple, reliable, and sufficient for this use case.
+    // ── Restore Requests Table ──
     await sql`
       CREATE TABLE IF NOT EXISTS restore_requests (
         id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-
-        -- Which device should restore the session
         target_device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-
-        -- Which snapshot to restore (null = latest for that device)
         snapshot_id UUID REFERENCES snapshots(id) ON DELETE SET NULL,
-
-        -- Status lifecycle: pending → completed | failed | expired
-        status      TEXT NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending', 'completed', 'failed', 'expired')),
-
-        -- Set by the extension after attempting restore
+        status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed', 'expired')),
         error_msg   TEXT,
-
         created_at  TIMESTAMPTZ DEFAULT NOW() NOT NULL,
         updated_at  TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-
-        -- Auto-expire requests after 5 minutes (extension may be offline)
         expires_at  TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '5 minutes') NOT NULL
       );
     `;
-    console.log('✅ Table "restore_requests" ready');
+    console.log('[+] Table "restore_requests" ready');
 
-    await sql`
-      CREATE INDEX IF NOT EXISTS idx_restore_device_status
-        ON restore_requests(target_device_id, status, expires_at);
-    `;
+    await sql`CREATE INDEX IF NOT EXISTS idx_restore_device_status ON restore_requests(target_device_id, status, expires_at);`;
     await sql`
       ALTER TABLE restore_requests 
         ADD COLUMN IF NOT EXISTS source_device_id UUID REFERENCES devices(id),
         ADD COLUMN IF NOT EXISTS target_url TEXT;
     `;
-    console.log('✅ Columns "source_device_id" and "target_url" in restore_requests ready');
+    console.log('[+] Columns "source_device_id" and "target_url" in restore_requests ready');
 
-    console.log('\n🎉 All migrations complete! Your database is ready.');
-    console.log('\nNext step: npm run dev\n');
+    console.log('\n[*] All migrations complete! Your database is ready.');
 
   } catch (error) {
-    console.error('\n❌ Migration failed:', error);
-    console.error('\nMake sure:');
-    console.error('  1. Your DATABASE_URL is correct in .env');
-    console.error('  2. PostgreSQL is running');
-    console.error('  3. The database exists (for local: createdb vaulttabs)\n');
+    console.error('\n[!] Migration failed:', error);
     process.exit(1);
   }
 
-  // Close the connection when done
   await sql.end();
 }
 
-// Run it
 migrate();

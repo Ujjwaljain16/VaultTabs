@@ -94,7 +94,7 @@ export default function LoginPage() {
         return;
       }
 
-      addLog('> master key decrypted ✓');
+      addLog('> master key decrypted');
       addLog('> server never saw your password or key');
       addLog('> loading dashboard...');
 
@@ -188,7 +188,7 @@ export default function LoginPage() {
 
           {error && (
             <div className={styles.error}>
-              <span className={styles.errorIcon}>✕</span> {error}
+              <span className={styles.errorIcon}>Error:</span> {error}
             </div>
           )}
 

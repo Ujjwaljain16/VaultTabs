@@ -1,44 +1,8 @@
 /**
  * entrypoints/background.ts
  *
- * The background service worker — production-grade, event-driven sync.
- *
- * ═══════════════════════════════════════════════════════════════
- * SYNC STRATEGY (why it's designed this way)
- * ═══════════════════════════════════════════════════════════════
- *
- * ❌ OLD (bad): Poll every 15 seconds
- *    - Wastes CPU, battery, bandwidth even when nothing changed
- *    - Fights against MV3's philosophy (service worker should sleep)
- *
- * ✅ NEW (correct): Event-driven + debounce + periodic fallback
- *
- *   LAYER 1 — Event triggers (primary)
- *   Tab created/removed/updated/moved, window created/removed.
- *   Any real state mutation fires these instantly.
- *
- *   LAYER 2 — 3-second debounce (batching)
- *   User opens 10 tabs in 2 seconds → only 1 upload, not 10.
- *   Debounce resets on every new event within the window.
- *   We use chrome.alarms (not setTimeout) because setTimeout
- *   dies when the service worker sleeps between events.
- *
- *   LAYER 3 — Periodic 3-minute fallback alarm
- *   Safety net: catches anything missed while service worker was asleep.
- *   Also handles the case where the network failed and we need to retry.
- *
- *   LAYER 4 — Hash comparison (skip redundant uploads)
- *   After building a snapshot, we SHA-256 hash the serialized tabs.
- *   If the hash matches the last uploaded snapshot → skip the upload.
- *   This handles events that fire but don't change real tab state
- *   (e.g. chrome.tabs.onActivated doesn't change URLs or titles).
- *
- * RESULT:
- *   CPU: near zero when idle
- *   Bandwidth: only when tabs actually change
- *   Battery: safe
- *   Latency: ~3 seconds after a tab change (feels real-time)
- * ═══════════════════════════════════════════════════════════════
+ * The background service worker manages event-driven syncing of tabs to the VaultTabs backend.
+ * Uses a debounce mechanism and periodic fallback alarms to optimize network and CPU usage.
  */
 
 import { encryptSnapshot, decryptSnapshot, TabSnapshot } from '../utils/crypto';
@@ -315,7 +279,7 @@ export default defineBackground(() => {
 
       await apiHeartbeat(storage.device_id);
 
-      console.log(`[VaultTabs] ✓ Synced ${tabs.length} tabs at ${capturedAt} (trigger: ${trigger}, total: ${newCount})`);
+      console.log(`[VaultTabs] Synced ${tabs.length} tabs at ${capturedAt} (trigger: ${trigger}, total: ${newCount})`);
 
       // Notify popup to refresh its display (if it's open)
       chrome.runtime.sendMessage({
@@ -415,7 +379,7 @@ export default defineBackground(() => {
       // Mark completed on backend
       await apiCompleteRestore(req.id, 'completed');
 
-      console.log(`[VaultTabs] ✓ Restored ${tabs.length} tabs from snapshot ${req.snapshot_id}`);
+      console.log(`[VaultTabs] Restored ${tabs.length} tabs from snapshot ${req.snapshot_id}`);
 
       // Notify popup
       chrome.runtime.sendMessage({

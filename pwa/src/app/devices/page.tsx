@@ -31,7 +31,6 @@ export default function DevicesPage() {
   async function handleDelete(deviceId: string) {
     if (confirmId !== deviceId) { setConfirmId(deviceId); return; }
 
-    // OPTIMISTIC UPDATE
     const originalDevices = [...devices];
     setDevices(prev => prev.filter(d => d.id !== deviceId));
     setConfirmId(null);
@@ -43,7 +42,7 @@ export default function DevicesPage() {
     const result = await apiDeleteDevice(session.jwt_token, deviceId);
     if (!result.ok) {
       setError(result.error || 'Failed to delete device');
-      setDevices(originalDevices); // Revert
+      setDevices(originalDevices);
     }
     setDeletingId(null);
   }
@@ -53,7 +52,6 @@ export default function DevicesPage() {
     const session = loadSession();
     if (!session) return;
 
-    // OPTIMISTIC UPDATE
     const originalDevices = [...devices];
     const newName = renameValue.trim();
     setDevices(prev => prev.map(d =>
@@ -65,7 +63,7 @@ export default function DevicesPage() {
     const result = await apiRenameDevice(session.jwt_token, deviceId, newName);
     if (!result.ok) {
       setError(result.error || 'Failed to rename device');
-      setDevices(originalDevices); // Revert
+      setDevices(originalDevices);
     }
   }
 
@@ -104,7 +102,6 @@ export default function DevicesPage() {
           {devices.map(device => (
             <div key={device.id} className={styles.card}>
 
-              {/* Device info */}
               {renamingId === device.id ? (
                 <div className={styles.renameRow}>
                   <input
@@ -116,7 +113,7 @@ export default function DevicesPage() {
                     placeholder="Device name"
                   />
                   <button className={styles.saveBtn} onClick={() => handleRename(device.id)}>Save</button>
-                  <button className={styles.cancelBtn} onClick={() => { setRenamingId(null); setRenameValue(''); }}>✕</button>
+                  <button className={styles.cancelBtn} onClick={() => { setRenamingId(null); setRenameValue(''); }}>Cancel</button>
                 </div>
               ) : (
                 <div className={styles.deviceInfo}>
@@ -127,7 +124,6 @@ export default function DevicesPage() {
                 </div>
               )}
 
-              {/* Actions */}
               {renamingId !== device.id && (
                 <div className={styles.actions}>
                   <button
@@ -143,7 +139,7 @@ export default function DevicesPage() {
                       onClick={() => handleDelete(device.id)}
                       disabled={deletingId === device.id}
                     >
-                      {deletingId === device.id ? 'Deleting...' : '⚠ Confirm delete'}
+                      {deletingId === device.id ? 'Deleting...' : 'Confirm delete'}
                     </button>
                   ) : (
                     <button

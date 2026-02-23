@@ -3,43 +3,30 @@ import { z } from 'zod';
 import { Container } from '../container.js';
 import { authenticate } from '../middleware/auth.js';
 
-
-// Schema for registration request body
 const RegisterSchema = z.object({
   email: z.string().email('Must be a valid email address'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
-
-  // These come from the client's crypto operations (done BEFORE hitting this endpoint)
   encrypted_master_key: z.string().min(1, 'encrypted_master_key is required'),
   master_key_iv: z.string().min(1, 'master_key_iv is required'),
   salt: z.string().min(1, 'salt is required'),
-  // ── Recovery key (Phase 4) ────────────────────────────────────────────
   recovery_encrypted_master_key: z.string().optional(),
   recovery_key_iv: z.string().optional(),
   recovery_key_salt: z.string().optional(),
   recovery_key_hash: z.string().optional(),
 });
 
-// Schema for login request body
 const LoginSchema = z.object({
   email: z.string().email('Must be a valid email address'),
   password: z.string().min(1, 'Password is required'),
 });
 
-// TypeScript types inferred from schemas
 type RegisterBody = z.infer<typeof RegisterSchema>;
 type LoginBody = z.infer<typeof LoginSchema>;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ROUTE PLUGIN
-// ─────────────────────────────────────────────────────────────────────────────
 
 export async function authRoutes(fastify: FastifyInstance, options: { container: Container }) {
   const { authService } = options.container;
 
-  // ── POST /auth/register ──────────────────────────────────────────────────
   fastify.post<{ Body: RegisterBody }>('/auth/register', async (request, reply) => {
-    // 1. Validate input
     const parseResult = RegisterSchema.safeParse(request.body);
     if (!parseResult.success) {
       return reply.status(400).send({
@@ -61,7 +48,6 @@ export async function authRoutes(fastify: FastifyInstance, options: { container:
     } = parseResult.data;
 
     try {
-      // 2. Delegate to business logic
       const result = await authService.register({
         email,
         password_plaintext: password,
@@ -74,7 +60,6 @@ export async function authRoutes(fastify: FastifyInstance, options: { container:
         recovery_key_hash,
       });
 
-      // 3. Return success
       return reply.status(201).send({
         message: 'Account created successfully',
         token: result.token,
@@ -95,10 +80,7 @@ export async function authRoutes(fastify: FastifyInstance, options: { container:
     }
   });
 
-
-  // ── POST /auth/login ─────────────────────────────────────────────────────
   fastify.post<{ Body: LoginBody }>('/auth/login', async (request, reply) => {
-    // 1. Validate input
     const parseResult = LoginSchema.safeParse(request.body);
     if (!parseResult.success) {
       return reply.status(400).send({
@@ -110,23 +92,19 @@ export async function authRoutes(fastify: FastifyInstance, options: { container:
     const { email, password } = parseResult.data;
 
     try {
-      // 2. Delegate to business logic
       const result = await authService.login(email, password);
 
-      // 3. Return success
       return reply.status(200).send({
         message: 'Login successful',
         ...result,
         user: {
           ...result.user,
-          has_recovery_key: !!(result as any).user.recovery_encrypted_master_key // This might need casting if result.user doesn't have it
+          has_recovery_key: !!(result as any).user.recovery_encrypted_master_key
         }
       });
     } catch (err) {
-      // Use the same generic error for "wrong email" and "wrong password"
       const msg = err instanceof Error ? err.message : 'Login failed';
       if (msg === 'Invalid credentials') {
-        // Add artificial delay for security
         await new Promise(r => setTimeout(r, 100));
         return reply.status(401).send({
           error: 'Invalid credentials',
@@ -137,15 +115,12 @@ export async function authRoutes(fastify: FastifyInstance, options: { container:
     }
   });
 
-
-  // ── GET /auth/me ─────────────────────────────────────────────────────────
   fastify.get('/auth/me', {
     preHandler: [authenticate],
   }, async (request, reply) => {
     // ...
   });
 
-  // ── POST /auth/recovery-material ─────────────────────────────────────────
   fastify.post<{ Body: { email: string } }>('/auth/recovery-material', async (request, reply) => {
     const { email } = request.body;
     if (!email) return reply.status(400).send({ error: 'Email required' });
@@ -165,7 +140,6 @@ export async function authRoutes(fastify: FastifyInstance, options: { container:
     }
   });
 
-  // ── POST /auth/recover ──────────────────────────────────────────────────
   fastify.post<{
     Body: {
       email: string;
@@ -199,7 +173,6 @@ export async function authRoutes(fastify: FastifyInstance, options: { container:
       return reply.status(401).send({ error: 'Invalid recovery code' });
     }
 
-    // Update security params
     const newPasswordHash = await hashPassword(new_password);
     await userRepository.updateSecurityParams(email, {
       password_hash: newPasswordHash,

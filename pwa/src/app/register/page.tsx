@@ -115,7 +115,7 @@ export default function RegisterPage() {
             });
             await saveMasterKey(masterKey);
 
-            addLog('> DONE ✓');
+            addLog('> DONE');
             addLog('> WARNING: Note your recovery code. It will never be shown again:');
             addLog(`> RECOVERY CODE: ${recoveryCode}`);
 
@@ -212,7 +212,7 @@ export default function RegisterPage() {
 
                     {error && (
                         <div className={styles.error}>
-                            <span className={styles.errorIcon}>✕</span> {error}
+                            <span className={styles.errorIcon}>Error:</span> {error}
                         </div>
                     )}
 

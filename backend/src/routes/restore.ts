@@ -6,7 +6,6 @@ import { authenticate } from '../middleware/auth.js';
 export async function restoreRoutes(fastify: FastifyInstance, options: { container: Container }) {
   const { restoreService } = options.container;
 
-  // ── POST /restore ────────────────────────────────────────────────────────
   fastify.post<{
     Body: { target_device_id: string; snapshot_id?: string; target_url?: string }
   }>('/restore', {
@@ -43,8 +42,6 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
     }
   });
 
-
-  // ── GET /restore/stream ──────────────────────────────────────────────────
   fastify.get<{
     Querystring: { device_id: string }
   }>('/restore/stream', {
@@ -61,13 +58,10 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
     reply.raw.setHeader('Content-Type', 'text/event-stream');
     reply.raw.setHeader('Cache-Control', 'no-cache');
     reply.raw.setHeader('Connection', 'keep-alive');
-    reply.raw.setHeader('Access-Control-Allow-Origin', '*'); // Or configured CORS
-
-    // Send a 200 OK immediately and flush headers
+    reply.raw.setHeader('Access-Control-Allow-Origin', '*');
     reply.raw.flushHeaders();
 
-    // 1. Initial Check: Immediately flush any pending request so the client
-    // doesn't miss anything that occurred while offline.
+    // Initial Check
     try {
       const initialPending = await restoreService.getPendingWithSnapshot(userId, device_id);
       if (initialPending) {
@@ -91,17 +85,14 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
       return;
     }
 
-    // 2. Heartbeat: Send a ping every 20 seconds to keep connection alive
-    // AND to keep the extension MV3 service worker alive.
+    // Heartbeat
     const interval = setInterval(() => {
       reply.raw.write(': heartbeat\n\n'); // SSE comment
     }, 20000);
 
-    // 3. Listen to the RestoreService events
     const eventName = `restore:${device_id}`;
     const onRestoreRequest = async (req: any) => {
       try {
-        // Re-fetch with snapshot blob since req from create() doesn't have the blob
         const pending = await restoreService.getPendingWithSnapshot(userId, device_id);
         if (pending && pending.id === req.id) {
           const payload = {
@@ -125,25 +116,16 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
 
     restoreService.events.on(eventName, onRestoreRequest);
 
-    // 4. Cleanup when the client disconnects
     request.raw.on('close', () => {
       clearInterval(interval);
       restoreService.events.off(eventName, onRestoreRequest);
     });
 
-    // Since we handle the response raw stream, we must return a promise that never resolves
-    // or fastify will close the connection early. We wait for client close.
-    // However, in async route handler, returning reply object or not resolving keeps it open,
-    // but the proper way in Fastify is:
     return new Promise((resolve) => {
-      request.raw.on('close', () => {
-        resolve(undefined);
-      });
+      request.raw.on('close', () => resolve(undefined));
     });
   });
 
-
-  // ── GET /restore/pending ─────────────────────────────────────────────────
   fastify.get<{
     Querystring: { device_id: string }
   }>('/restore/pending', {
@@ -176,8 +158,6 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
     });
   });
 
-
-  // ── PATCH /restore/:id ───────────────────────────────────────────────────
   fastify.patch<{
     Params: { id: string };
     Body: { status: 'completed' | 'failed'; error_msg?: string };
@@ -211,8 +191,6 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
     }
   });
 
-
-  // ── GET /restore/:id ─────────────────────────────────────────────────────
   fastify.get<{ Params: { id: string } }>('/restore/:id', {
     preHandler: [authenticate],
   }, async (request, reply) => {

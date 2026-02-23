@@ -21,6 +21,7 @@ export interface Device {
     id: string;
     user_id: string;
     device_name: string;
+    fingerprint?: string; // Hardware-based browser identifier
     last_seen: Date | string;
     created_at: Date | string;
 }

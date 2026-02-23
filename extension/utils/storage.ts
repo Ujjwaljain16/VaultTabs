@@ -56,23 +56,52 @@ export interface ExtensionStorageData {
 export async function saveToStorage(data: Partial<ExtensionStorageData>): Promise<void> {
   return new Promise((resolve, reject) => {
     chrome.storage.local.set(data, () => {
-      if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
-      else resolve();
+      if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
+
+      // Mirror device identity to SYNC storage for cross-install persistence
+      const syncData: Partial<ExtensionStorageData> = {};
+      if (data.device_id) syncData.device_id = data.device_id;
+      if (data.device_name) syncData.device_name = data.device_name;
+
+      if (Object.keys(syncData).length > 0) {
+        chrome.storage.sync.set(syncData, () => {
+          // Ignore sync errors — localized failure shouldn't block local save
+          resolve();
+        });
+      } else {
+        resolve();
+      }
     });
   });
 }
 
 export async function loadFromStorage(): Promise<ExtensionStorageData> {
   return new Promise((resolve, reject) => {
-    chrome.storage.local.get(null, (result) => {
-      if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
-      else resolve(result as ExtensionStorageData);
+    chrome.storage.local.get(null, (local) => {
+      if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
+
+      const localData = local as ExtensionStorageData;
+
+      // If missing device info, check SYNC storage (e.g. after reinstall)
+      if (!localData.device_id) {
+        chrome.storage.sync.get(['device_id', 'device_name'], (sync) => {
+          resolve({
+            ...localData,
+            device_id: sync.device_id || localData.device_id,
+            device_name: sync.device_name || localData.device_name,
+          });
+        });
+      } else {
+        resolve(localData);
+      }
     });
   });
 }
 
 export async function clearStorage(): Promise<void> {
   return new Promise((resolve, reject) => {
+    // Note: We do NOT clear chrome.storage.sync here.
+    // Logging out clears local identity, but allows "re-identification" via sync on next login.
     chrome.storage.local.get(['device_id', 'device_name'], (preserved) => {
       chrome.storage.local.clear(() => {
         if (chrome.runtime.lastError) {

@@ -5,11 +5,25 @@ import { Device } from '../interfaces/models.js';
 export class DeviceService implements IDeviceService {
     constructor(private deviceRepository: IDeviceRepository) { }
 
-    async registerDevice(userId: string, name: string): Promise<Device> {
+    async registerDevice(userId: string, name: string, fingerprint?: string): Promise<Device> {
+        // 1. Try finding by fingerprint first (robust identification)
+        if (fingerprint) {
+            const existing = await this.deviceRepository.findByFingerprint(userId, fingerprint);
+            if (existing) {
+                return this.deviceRepository.upsert({
+                    ...existing,
+                    device_name: name, // User might have renamed it during re-registration
+                    last_seen: new Date(),
+                });
+            }
+        }
+
+        // 2. Otherwise create new
         return this.deviceRepository.upsert({
             id: crypto.randomUUID(),
             user_id: userId,
             device_name: name,
+            fingerprint,
             last_seen: new Date(),
         });
     }

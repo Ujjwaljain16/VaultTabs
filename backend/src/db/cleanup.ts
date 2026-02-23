@@ -1,29 +1,6 @@
 /**
  * src/db/cleanup.ts
- *
- * Database maintenance job. Runs on a schedule (hourly via Docker Compose,
- * or via cron/Fly.io machines in production).
- *
- * TASKS:
- *
- * 1. Expire stale restore_requests
- *    Any request older than 10 minutes in "pending" state is expired.
- *    (expires_at column handles the 5-min window, this catches anything missed)
- *
- * 2. Enforce snapshot retention per user
- *    Each user has a snapshot_retention setting (default: 50 per device).
- *    This job prunes snapshots exceeding that limit.
- *    retention = 0 means unlimited (skip pruning).
- *
- * 3. Remove orphaned devices
- *    Devices with no snapshots and last_seen > 90 days ago are removed.
- *    (Keeps the device list clean)
- *
- * Run manually:
- *   npm run db:cleanup
- *
- * Runs automatically:
- *   Via Docker Compose cleanup service (every hour)
+ * Database maintenance job.
  */
 
 import 'dotenv/config';
@@ -39,7 +16,6 @@ export async function runCleanup() {
   let totalOrphaned = 0;
 
   try {
-    // ... Task 1: Expire stale restore_requests ...
     const expireResult = await sql`
       UPDATE restore_requests
       SET status = 'expired', updated_at = NOW()
@@ -50,7 +26,6 @@ export async function runCleanup() {
     totalExpired = expireResult.length;
     console.log(`[Cleanup] Expired ${totalExpired} stale restore requests`);
 
-    // ... Task 2: Enforce snapshot retention per user ...
     const users = await sql`
       SELECT id, snapshot_retention FROM users
       WHERE snapshot_retention > 0
@@ -81,7 +56,6 @@ export async function runCleanup() {
       console.log(`[Cleanup] Pruned ${totalPruned} old snapshots`);
     }
 
-    // ... Task 3: Remove orphaned devices ...
     const orphanResult = await sql`
       DELETE FROM devices
       WHERE id IN (
@@ -94,7 +68,6 @@ export async function runCleanup() {
     `;
     totalOrphaned = orphanResult.length;
 
-    // ... Task 4: Stats ...
     const [stats] = await sql`
       SELECT
         (SELECT COUNT(*) FROM users)            AS user_count,
@@ -111,7 +84,6 @@ export async function runCleanup() {
   }
 }
 
-// Allow running as a script
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   runCleanup().then(() => sql.end());
 }

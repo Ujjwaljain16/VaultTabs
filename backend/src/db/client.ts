@@ -1,15 +1,6 @@
 /**
  * src/db/client.ts
- *
- * This file creates the database connection.
- *
- * WHAT IS HAPPENING:
- * - We import the `postgres` library (it's the driver that lets Node.js talk to PostgreSQL)
- * - We read DATABASE_URL from your .env file
- * - We create one connection pool that the whole app shares
- * - We export `sql` — a tagged template function you use like:
- *     const rows = await sql`SELECT * FROM users WHERE email = ${email}`
- *   (The library automatically sanitizes inputs to prevent SQL injection)
+ * Configures the connection pool to PostgreSQL securely utilizing postgres.js.
  */
 
 import postgres from 'postgres';

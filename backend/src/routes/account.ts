@@ -6,7 +6,6 @@ import { authenticate } from '../middleware/auth.js';
 export async function accountRoutes(fastify: FastifyInstance, options: { container: Container }) {
   const { accountService, deviceService } = options.container;
 
-  // ── GET /account ───────────────────────────────────────────────────────────
   fastify.get('/account', { preHandler: [authenticate] }, async (request, reply) => {
     const { userId } = request.user;
     try {
@@ -17,8 +16,6 @@ export async function accountRoutes(fastify: FastifyInstance, options: { contain
     }
   });
 
-
-  // ── PATCH /account/retention ───────────────────────────────────────────────
   fastify.patch('/account/retention', { preHandler: [authenticate] }, async (request, reply) => {
     const { userId } = request.user;
 
@@ -43,16 +40,12 @@ export async function accountRoutes(fastify: FastifyInstance, options: { contain
     });
   });
 
-
-  // ── GET /account/devices ───────────────────────────────────────────────────
   fastify.get('/account/devices', { preHandler: [authenticate] }, async (request, reply) => {
     const { userId } = request.user;
     const devices = await accountService.listDevicesWithStats(userId);
     return reply.send({ devices });
   });
 
-
-  // ── PATCH /account/devices/:id ─────────────────────────────────────────────
   fastify.patch<{ Params: { id: string } }>(
     '/account/devices/:id', { preHandler: [authenticate] },
     async (request, reply) => {
@@ -77,8 +70,6 @@ export async function accountRoutes(fastify: FastifyInstance, options: { contain
     }
   );
 
-
-  // ── DELETE /account/devices/:id ────────────────────────────────────────────
   fastify.delete<{ Params: { id: string } }>(
     '/account/devices/:id', { preHandler: [authenticate] },
     async (request, reply) => {
@@ -96,8 +87,6 @@ export async function accountRoutes(fastify: FastifyInstance, options: { contain
     }
   );
 
-
-  // ── DELETE /account ────────────────────────────────────────────────────────
   fastify.delete('/account', {
     preHandler: [authenticate],
     config: { rateLimit: { max: 3, timeWindow: '1 hour' } },

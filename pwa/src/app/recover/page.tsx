@@ -191,7 +191,9 @@ export default function RecoverPage() {
     return (
       <div className={styles.root}>
         <div className={styles.card}>
-          <div className={styles.successIcon}>✓</div>
+          <div className={styles.successIcon}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </div>
           <div className={styles.title}>Account Recovered</div>
           <div className={styles.desc}>
             Your password has been updated and your encryption keys are intact.
@@ -243,7 +245,7 @@ export default function RecoverPage() {
 
         {(phase === 'error') && (
           <div className={styles.error}>
-            <span className={styles.errorIcon}>✕</span> {errorMsg}
+            <span className={styles.errorIcon}>Error:</span> {errorMsg}
           </div>
         )}
 

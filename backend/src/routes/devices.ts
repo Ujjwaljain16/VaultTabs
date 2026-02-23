@@ -3,11 +3,11 @@ import { z } from 'zod';
 import { Container } from '../container.js';
 import { authenticate } from '../middleware/auth.js';
 
-// Validation schema for device registration
 const RegisterDeviceSchema = z.object({
   device_name: z.string()
     .min(1, 'device_name is required')
     .max(100, 'device_name must be under 100 characters'),
+  fingerprint: z.string().optional(),
 });
 
 type RegisterDeviceBody = z.infer<typeof RegisterDeviceSchema>;
@@ -15,7 +15,6 @@ type RegisterDeviceBody = z.infer<typeof RegisterDeviceSchema>;
 export async function deviceRoutes(fastify: FastifyInstance, options: { container: Container }) {
   const { deviceService } = options.container;
 
-  // ── POST /devices/register ───────────────────────────────────────────────
   fastify.post<{ Body: RegisterDeviceBody }>('/devices/register', {
     preHandler: [authenticate],
   }, async (request, reply) => {
@@ -29,8 +28,8 @@ export async function deviceRoutes(fastify: FastifyInstance, options: { containe
       });
     }
 
-    const { device_name } = parseResult.data;
-    const device = await deviceService.registerDevice(userId, device_name);
+    const { device_name, fingerprint } = parseResult.data;
+    const device = await deviceService.registerDevice(userId, device_name, fingerprint);
 
     return reply.status(201).send({
       message: 'Device registered',
@@ -38,8 +37,6 @@ export async function deviceRoutes(fastify: FastifyInstance, options: { containe
     });
   });
 
-
-  // ── GET /devices ─────────────────────────────────────────────────────────
   fastify.get('/devices', {
     preHandler: [authenticate],
   }, async (request, reply) => {
@@ -48,8 +45,6 @@ export async function deviceRoutes(fastify: FastifyInstance, options: { containe
     return reply.send({ devices });
   });
 
-
-  // ── PATCH /devices/:id/heartbeat ─────────────────────────────────────────
   fastify.patch<{ Params: { id: string } }>('/devices/:id/heartbeat', {
     preHandler: [authenticate],
   }, async (request, reply) => {
@@ -64,8 +59,6 @@ export async function deviceRoutes(fastify: FastifyInstance, options: { containe
     }
   });
 
-
-  // ── DELETE /devices/:id ──────────────────────────────────────────────────
   fastify.delete<{ Params: { id: string } }>('/devices/:id', {
     preHandler: [authenticate],
   }, async (request, reply) => {

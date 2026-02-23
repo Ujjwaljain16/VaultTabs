@@ -178,10 +178,10 @@ export async function apiGetMe() {
 // (Local DeviceResponse replaced)
 
 /** Register this browser as a device */
-export async function apiRegisterDevice(deviceName: string) {
+export async function apiRegisterDevice(deviceName: string, fingerprint?: string) {
   return apiFetch<DeviceResponse>('/devices/register', {
     method: 'POST',
-    body: JSON.stringify({ device_name: deviceName }),
+    body: JSON.stringify({ device_name: deviceName, fingerprint }),
   });
 }
 

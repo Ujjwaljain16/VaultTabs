@@ -24,6 +24,8 @@ import {
   clearStorage, saveMasterKey, clearMasterKey, loadMasterKey,
 } from '../../utils/storage';
 
+import { getBrowserFingerprint } from '../../utils/fingerprint';
+
 import {
   apiRegister, apiLogin, apiRegisterDevice, apiRenameDevice, getDeviceName,
   apiGetDevices, apiCreateRestoreRequest, type Device
@@ -357,7 +359,8 @@ async function handleRegister(e: Event) {
     const finalDeviceName = deviceName || existing.device_name || getDeviceName();
 
     if (!deviceId) {
-      const deviceResult = await apiRegisterDevice(finalDeviceName);
+      const fingerprint = await getBrowserFingerprint();
+      const deviceResult = await apiRegisterDevice(finalDeviceName, fingerprint);
       if (!deviceResult.ok || !deviceResult.data) {
         showError('reg-error', 'Account created but device registration failed. Please login.');
         return;
@@ -405,7 +408,7 @@ function showRecoveryScreen(recoveryCode: string, email: string) {
   const copyBtn = el('btn-copy-recovery');
   copyBtn.addEventListener('click', async () => {
     await navigator.clipboard.writeText(recoveryCode);
-    copyBtn.textContent = '✓ COPIED';
+    copyBtn.textContent = 'COPIED';
     copyBtn.style.color = 'var(--accent)';
     setTimeout(() => { copyBtn.textContent = 'COPY'; copyBtn.style.color = ''; }, 2000);
   });
@@ -538,7 +541,8 @@ async function doLogin(email: string, password: string, errorElId: string, custo
 
   if (!deviceId) {
     // First time on this browser — register a new device
-    const deviceResult = await apiRegisterDevice(deviceName);
+    const fingerprint = await getBrowserFingerprint();
+    const deviceResult = await apiRegisterDevice(deviceName, fingerprint);
     if (!deviceResult.ok || !deviceResult.data) {
       showError(errorElId, 'Login ok but device registration failed. Try again.');
       return;
@@ -603,7 +607,7 @@ chrome.runtime.onMessage.addListener((message) => {
 
   if (message.type === 'RESTORE_COMPLETE') {
     const toast = el('restore-toast');
-    el('restore-toast-text').textContent = `✓ ${message.tabCount} tabs restored to desktop`;
+    el('restore-toast-text').textContent = `${message.tabCount} tabs restored to desktop`;
     toast.classList.remove('hidden');
     setTimeout(() => toast.classList.add('hidden'), 4000);
     const dashboard = document.getElementById('screen-dashboard');
@@ -732,7 +736,7 @@ async function handleSendToDevice(targetDeviceId: string, url: string) {
   }
 
   el('device-picker-overlay').classList.add('hidden');
-  showToast('✓ Tab sent!');
+  showToast('Tab sent!');
   pendingSendUrl = null;
 }
 
