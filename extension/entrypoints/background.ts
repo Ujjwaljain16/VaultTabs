@@ -7,7 +7,8 @@
 
 import { encryptSnapshot, decryptSnapshot, TabSnapshot } from '../utils/crypto';
 import { loadFromStorage, saveToStorage, loadMasterKey } from '../utils/storage';
-import { apiUploadSnapshot, apiHeartbeat, apiGetPendingRestore, apiCompleteRestore, apiConnectRestoreStream } from '../utils/api';
+import { apiUploadSnapshot, apiHeartbeat, apiGetPendingRestore, apiCompleteRestore, apiConnectRestoreStream, apiRegisterDevice, getDeviceName } from '../utils/api';
+import { getBrowserFingerprint } from '../utils/fingerprint';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
@@ -261,7 +262,23 @@ export default defineBackground(() => {
 
       if (!result.ok) {
         console.error('[VaultTabs] Upload failed:', result.error);
-        // Keep isDirty = true so the fallback alarm retries
+
+        // AUTO-RECOVERY: If the server says this device doesn't belong to us,
+        // it usually means we switched accounts or the backend state changed.
+        // Try to re-verify identity using fingerprint.
+        if (result.error?.includes('This device does not belong to your account')) {
+          console.warn('[VaultTabs] Device identity mismatch — attempting auto-recovery...');
+          const fingerprint = await getBrowserFingerprint();
+          const deviceName = storage.device_name || getDeviceName();
+          const regResult = await apiRegisterDevice(deviceName, fingerprint);
+
+          if (regResult.ok && regResult.data) {
+            const newId = regResult.data.device.id;
+            console.log('[VaultTabs] Device identity successfully recovered:', newId);
+            await saveToStorage({ device_id: newId });
+            // The next fallback/debounce alarm will use the new ID
+          }
+        }
         return;
       }
 
