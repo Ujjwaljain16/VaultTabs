@@ -352,21 +352,18 @@ async function handleRegister(e: Event) {
 
     const { token, user } = result.data;
 
-    // 4. Register device (reuse existing device_id if present)
+    // 4. Register/Verify device (Never reuse ID from storage unconditionally)
     await saveToStorage({ jwt_token: token, user_id: user.id, user_email: user.email });
     const existing = await loadFromStorage();
-    let deviceId = existing.device_id;
     const finalDeviceName = deviceName || existing.device_name || getDeviceName();
 
-    if (!deviceId) {
-      const fingerprint = await getBrowserFingerprint();
-      const deviceResult = await apiRegisterDevice(finalDeviceName, fingerprint);
-      if (!deviceResult.ok || !deviceResult.data) {
-        showError('reg-error', 'Account created but device registration failed. Please login.');
-        return;
-      }
-      deviceId = deviceResult.data.device.id;
+    const fingerprint = await getBrowserFingerprint();
+    const deviceResult = await apiRegisterDevice(finalDeviceName, fingerprint);
+    if (!deviceResult.ok || !deviceResult.data) {
+      showError('reg-error', 'Account created but device registration failed. Please login.');
+      return;
     }
+    const deviceId = deviceResult.data.device.id;
 
     // 5. Persist session
     await saveToStorage({
@@ -527,29 +524,19 @@ async function doLogin(email: string, password: string, errorElId: string, custo
   await saveToStorage({ jwt_token: token, user_id: user.id, user_email: user.email });
 
   // ── Device registration ──────────────────────────────────────────────────
-  // IMPORTANT: Only register a new device if we don't already have a device_id.
-  // During development, the extension reloads frequently. Without this check,
-  // every reload creates a new device entry in the database, causing stale
-  // "ghost devices" to appear in the PWA.
-  //
-  // Priority order:
-  //   1. Use existing device_id from storage (most common — extension reloaded)
-  //   2. Register new device (first login on this browser)
+  // Always register/verify device on login.
+  // This ensures that the device_id in storage belongs to the CURRENT user.
   const existing = await loadFromStorage();
-  let deviceId = existing.device_id;
   let deviceName = customDeviceName || existing.device_name || getDeviceName();
 
-  if (!deviceId) {
-    // First time on this browser — register a new device
-    const fingerprint = await getBrowserFingerprint();
-    const deviceResult = await apiRegisterDevice(deviceName, fingerprint);
-    if (!deviceResult.ok || !deviceResult.data) {
-      showError(errorElId, 'Login ok but device registration failed. Try again.');
-      return;
-    }
-    deviceId = deviceResult.data.device.id;
-    deviceName = deviceResult.data.device.device_name;
+  const fingerprint = await getBrowserFingerprint();
+  const deviceResult = await apiRegisterDevice(deviceName, fingerprint);
+  if (!deviceResult.ok || !deviceResult.data) {
+    showError(errorElId, 'Login ok but device registration failed. Try again.');
+    return;
   }
+  const deviceId = deviceResult.data.device.id;
+  deviceName = deviceResult.data.device.device_name;
 
   await saveToStorage({
     jwt_token: token, user_id: user.id, user_email: user.email,
