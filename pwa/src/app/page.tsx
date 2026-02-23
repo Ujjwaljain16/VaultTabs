@@ -109,7 +109,7 @@ export default function RootPage() {
               </button>
             ) : (
               <>
-                <button className={styles.btnPrimary} onClick={() => window.open('https://github.com/Ujjwaljain16/VaultTabs', '_blank')}>
+                <button className={styles.btnPrimary} onClick={() => window.location.href = '/vaulttabs-extension.zip'}>
                   Download Extension
                 </button>
                 <button className={styles.btnSecondary} onClick={() => router.push('/register')}>
@@ -282,7 +282,7 @@ export default function RootPage() {
             </button>
           ) : (
             <div className={styles.ctaButtons}>
-              <button className={styles.btnPrimary} onClick={() => window.open('https://github.com/Ujjwaljain16/VaultTabs', '_blank')}>
+              <button className={styles.btnPrimary} onClick={() => window.location.href = '/vaulttabs-extension.zip'}>
                 Download Extension
               </button>
               <button className={styles.btnSecondary} onClick={() => router.push('/register')}>
