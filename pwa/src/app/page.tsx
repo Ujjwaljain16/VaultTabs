@@ -6,8 +6,10 @@ import { loadSession, loadMasterKey } from '@/lib/storage';
 import styles from './landing.module.css';
 
 // Hook for scroll animations
-function useScrollReveal() {
+function useScrollReveal(isReady: boolean) {
   useEffect(() => {
+    if (!isReady) return;
+
     const observer = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
         if (entry.isIntersecting) {
@@ -16,9 +18,16 @@ function useScrollReveal() {
       });
     }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
 
-    document.querySelectorAll(`.${styles.reveal}`).forEach(el => observer.observe(el));
-    return () => observer.disconnect();
-  }, []);
+    // Use setTimeout to ensure React has painted the DOM
+    const timeoutId = setTimeout(() => {
+      document.querySelectorAll(`.${styles.reveal}`).forEach(el => observer.observe(el));
+    }, 100);
+
+    return () => {
+      clearTimeout(timeoutId);
+      observer.disconnect();
+    };
+  }, [isReady]);
 }
 
 export default function RootPage() {
@@ -26,7 +35,7 @@ export default function RootPage() {
   const [isReady, setIsReady] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-  useScrollReveal();
+  useScrollReveal(isReady);
 
   useEffect(() => {
     async function check() {
