@@ -5,21 +5,27 @@ import sql from '../db/client.js';
 export class PostgresDeviceRepository implements IDeviceRepository {
   async findByUserId(userId: string): Promise<Device[]> {
     return await sql<Device[]>`
-      SELECT * FROM devices WHERE user_id = ${userId}
+      SELECT id, user_id, device_name, fingerprint, last_seen, created_at 
+      FROM devices 
+      WHERE user_id = ${userId}
       ORDER BY last_seen DESC
     `;
   }
 
   async findByDeviceId(deviceId: string): Promise<Device | undefined> {
     const [device] = await sql<Device[]>`
-      SELECT * FROM devices WHERE id = ${deviceId} LIMIT 1
+      SELECT id, user_id, device_name, fingerprint, last_seen, created_at 
+      FROM devices 
+      WHERE id = ${deviceId} LIMIT 1
     `;
     return device;
   }
 
   async findByFingerprint(userId: string, fingerprint: string): Promise<Device | undefined> {
     const [device] = await sql<Device[]>`
-      SELECT * FROM devices WHERE user_id = ${userId} AND fingerprint = ${fingerprint} LIMIT 1
+      SELECT id, user_id, device_name, fingerprint, last_seen, created_at 
+      FROM devices 
+      WHERE user_id = ${userId} AND fingerprint = ${fingerprint} LIMIT 1
     `;
     return device;
   }
@@ -49,7 +55,7 @@ export class PostgresDeviceRepository implements IDeviceRepository {
             device_name = EXCLUDED.device_name,
             fingerprint = EXCLUDED.fingerprint,
             last_seen   = EXCLUDED.last_seen
-          RETURNING *
+          RETURNING id, user_id, device_name, fingerprint, last_seen, created_at
         `;
     return upserted;
   }
