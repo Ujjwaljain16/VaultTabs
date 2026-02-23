@@ -477,6 +477,47 @@
   flex-direction: column;
 }
 
+/* ── Window Group ──────────────────────────────── */
+.windowGroup {
+  display: flex;
+  flex-direction: column;
+}
+
+.windowGroup:not(:last-child) {
+  border-bottom: 4px solid var(--black-3);
+}
+
+.windowHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--black-2);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.windowIcon {
+  display: flex;
+  align-items: center;
+  color: var(--text-3);
+}
+
+.windowBadge {
+  background: var(--black);
+  border: 1px solid var(--border-2);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  color: var(--text-3);
+  margin-left: auto;
+}
+
 /* ── Individual tab row ───────────────────────── */
 .tabRow {
   display: flex;

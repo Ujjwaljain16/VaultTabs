@@ -451,6 +451,16 @@ function DeviceCard({ device, allDevices, expanded, onToggle, onOpenTab, onResto
   const isLoading = device.status === 'loading';
   const isError = device.status === 'error';
 
+  // Group tabs by windowId
+  const tabsByWindow = device.tabs.reduce((acc, tab) => {
+    const wid = tab.windowId || 0; // Fallback if undefined
+    if (!acc[wid]) acc[wid] = [];
+    acc[wid].push(tab);
+    return acc;
+  }, {} as Record<number, typeof device.tabs>);
+
+  const windowIds = Object.keys(tabsByWindow).map(Number);
+
   return (
     <div className={styles.deviceCard}>
 
@@ -472,7 +482,7 @@ function DeviceCard({ device, allDevices, expanded, onToggle, onOpenTab, onResto
             <div className={styles.deviceMeta}>
               {isLoading ? 'decrypting...'
                 : isError ? device.errorMsg
-                  : `${device.tabs.length} tabs · ${formatRelativeTime(device.capturedAt)}`}
+                  : `${device.tabs.length} tabs in ${Object.keys(tabsByWindow).length} window${Object.keys(tabsByWindow).length === 1 ? '' : 's'} · ${formatRelativeTime(device.capturedAt)}`}
             </div>
           </div>
         </div>
@@ -517,37 +527,52 @@ function DeviceCard({ device, allDevices, expanded, onToggle, onOpenTab, onResto
             <div className={styles.noTabs}>No HTTP tabs in this snapshot</div>
           ) : (
             <div className={styles.tabRows}>
-              {device.tabs.map((tab, i) => (
-                <button key={i} className={`${styles.tabRow} ${tab.active ? styles.tabRowActive : ''}`} onClick={() => onOpenTab(tab.url)}>
-                  <div className={styles.favicon}>
-                    {tab.favIconUrl
-                      ? <img src={tab.favIconUrl} alt="" width={14} height={14} style={{ borderRadius: 2 }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                      : <span className={styles.faviconFallback}>○</span>
-                    }
-                  </div>
-                  <div className={styles.tabInfo}>
-                    <div className={styles.tabTitle}>{tab.title || 'Untitled'}</div>
-                    <div className={styles.tabUrl}>{getHostname(tab.url)}</div>
-                  </div>
-                  <div className={styles.tabMeta}>
-                    {tab.active && <span className={styles.activeDot} />}
-                    {tab.pinned && <span className={styles.pinnedIcon}>◆</span>}
-                    {/* Simple restore button - restores to the same device as the snapshot by default */}
-                    <div className={styles.tabActions}>
-                      <button
-                        className={styles.miniRestoreBtn}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onShowDevicePicker(tab.url);
-                        }}
-                        title="Restore this tab only"
-                      >
-                        ⟳
-                      </button>
-                      <span className={styles.openIcon}>↗</span>
+              {windowIds.map((wid, wIndex) => (
+                <div key={wid} className={styles.windowGroup}>
+                  {windowIds.length > 1 && (
+                    <div className={styles.windowHeader}>
+                      <span className={styles.windowIcon}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="3" y1="9" x2="21" y2="9" />
+                        </svg>
+                      </span>
+                      <span>Window {wIndex + 1}</span>
+                      <span className={styles.windowBadge}>{tabsByWindow[wid].length}</span>
                     </div>
-                  </div>
-                </button>
+                  )}
+                  {tabsByWindow[wid].map((tab, i) => (
+                    <button key={i} className={`${styles.tabRow} ${tab.active ? styles.tabRowActive : ''}`} onClick={() => onOpenTab(tab.url)}>
+                      <div className={styles.favicon}>
+                        {tab.favIconUrl
+                          ? <img src={tab.favIconUrl} alt="" width={14} height={14} style={{ borderRadius: 2 }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                          : <span className={styles.faviconFallback}>○</span>
+                        }
+                      </div>
+                      <div className={styles.tabInfo}>
+                        <div className={styles.tabTitle}>{tab.title || 'Untitled'}</div>
+                        <div className={styles.tabUrl}>{getHostname(tab.url)}</div>
+                      </div>
+                      <div className={styles.tabMeta}>
+                        {tab.active && <span className={styles.activeDot} />}
+                        {tab.pinned && <span className={styles.pinnedIcon}>◆</span>}
+                        {/* Simple restore button - restores to the same device as the snapshot by default */}
+                        <div className={styles.tabActions}>
+                          <button
+                            className={styles.miniRestoreBtn}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onShowDevicePicker(tab.url);
+                            }}
+                            title="Restore this tab only"
+                          >
+                            ⟳
+                          </button>
+                          <span className={styles.openIcon}>↗</span>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
               ))}
             </div>
           )}
