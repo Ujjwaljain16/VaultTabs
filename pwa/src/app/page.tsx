@@ -1,23 +1,38 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { loadSession, loadMasterKey } from '@/lib/storage';
 import styles from './landing.module.css';
+
+// Hook for scroll animations
+function useScrollReveal() {
+  useEffect(() => {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add(styles.revealed);
+        }
+      });
+    }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+
+    document.querySelectorAll(`.${styles.reveal}`).forEach(el => observer.observe(el));
+    return () => observer.disconnect();
+  }, []);
+}
 
 export default function RootPage() {
   const router = useRouter();
   const [isReady, setIsReady] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
+  useScrollReveal();
+
   useEffect(() => {
     async function check() {
       const session = loadSession();
       const masterKey = await loadMasterKey();
-
-      if (session && masterKey) {
-        setIsLoggedIn(true);
-      }
+      if (session && masterKey) setIsLoggedIn(true);
       setIsReady(true);
     }
     check();
@@ -25,131 +40,216 @@ export default function RootPage() {
 
   if (!isReady) {
     return (
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        height: '100dvh', background: 'var(--black)',
-      }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100dvh', background: 'var(--black)' }}>
         <div className={styles.spinner}></div>
       </div>
     );
   }
 
   return (
-    <div className={styles.heroContainer}>
-      <div className={styles.bgGrid}></div>
-
-      <div className={styles.content}>
-        <div className={styles.badge}>
-          <span>✓</span> Zero-Knowledge End-to-End Encryption
+    <div className={styles.layout}>
+      {/* NAVBAR */}
+      <nav className={styles.navbar}>
+        <div className={styles.logo}>
+          <div className={styles.logoIcon}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+          </div>
+          VaultTabs
         </div>
-
-        <h1 className={styles.title}>
-          Your Tabs. Everywhere. <br />
-          <span className={styles.titleHighlight}>Fully Encrypted.</span>
-        </h1>
-
-        <p className={styles.description}>
-          VaultTabs syncs your browser tabs across all your devices in real-time.
-          Send a tab from your phone to your laptop instantly, with military-grade privacy.
-          We never see your data.
-        </p>
-
-        <div className={styles.ctas}>
+        <div className={styles.navLinks}>
+          <button className={styles.navBtn} onClick={() => window.open('https://github.com/Ujjwaljain16/VaultTabs', '_blank')}>Source Code</button>
           {isLoggedIn ? (
-            <button className={styles.btnPrimary} onClick={() => router.push('/dashboard')}>
-              Enter Vault
-            </button>
+            <button className={styles.navBtnPrimary} onClick={() => router.push('/dashboard')}>Dashboard</button>
           ) : (
-            <>
-              <button className={styles.btnPrimary} onClick={() => router.push('/login')}>
-                Get Started
-              </button>
-              <button className={styles.btnSecondary} onClick={() => window.open('https://github.com/Ujjwaljain16/VaultTabs', '_blank')}>
-                View Source
-              </button>
-            </>
+            <button className={styles.navBtnPrimary} onClick={() => router.push('/login')}>Login</button>
           )}
         </div>
-      </div>
+      </nav>
 
-      <div className={styles.visualContainer}>
-        <div className={styles.browserMockup}>
-          <div className={styles.browserHeader}>
-            <div className={styles.dot}></div>
-            <div className={styles.dot}></div>
-            <div className={styles.dot}></div>
-            <div className={styles.browserTab}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-              </svg>
-              My Secure Workspace
-            </div>
-          </div>
-          <div className={styles.browserBody}>
-            <div className={styles.shieldIcon}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                <path d="m9 12 2 2 4-4" />
-              </svg>
-            </div>
-            {/* Floating Tabs */}
-            <div className={`${styles.floatingTab} ${styles.tab1}`}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#39ff85" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
-              Research.pdf
-            </div>
-            <div className={`${styles.floatingTab} ${styles.tab2}`}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-              Youtube - LoFi
-            </div>
-            <div className={`${styles.floatingTab} ${styles.tab3}`}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#39ff85" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
-              Project Vault
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* HERO SECTION */}
+      <header className={styles.heroContainer}>
+        <div className={styles.bgGrid}></div>
 
-      <div className={styles.features}>
-        <div className={styles.featureCard}>
-          <div className={styles.featureIcon}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-              <path d="M21 3v5h-5" />
-            </svg>
+        <div className={`${styles.heroContent} ${styles.reveal}`}>
+          <div className={styles.badge}>
+            <div className={styles.badgePulse}></div>
+            Military-Grade Encryption
           </div>
-          <h3 className={styles.featureTitle}>Real-Time Sync</h3>
-          <p className={styles.featureDesc}>
-            Open a tab on your laptop, and it instantly appears on your dashboard. No manual refreshing required.
+
+          <h1 className={styles.title}>
+            Your Tabs. Everywhere.<br />
+            <span className={styles.titleHighlight}>Fully Encrypted.</span>
+          </h1>
+
+          <p className={styles.description}>
+            Sync your workspaces perfectly across laptops, desktops, and phones.
+            Send tabs instantly between devices without lifting a finger. Built on
+            Zero-Knowledge architecture—we never see your data.
           </p>
+
+          <div className={styles.ctas}>
+            {isLoggedIn ? (
+              <button className={styles.btnPrimary} onClick={() => router.push('/dashboard')}>
+                Launch Vault
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+              </button>
+            ) : (
+              <>
+                <button className={styles.btnPrimary} onClick={() => router.push('/login')}>
+                  Get Started Free
+                </button>
+                <button className={styles.btnSecondary} onClick={() => window.open('https://github.com/Ujjwaljain16/VaultTabs', '_blank')}>
+                  View architecture
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
-        <div className={styles.featureCard}>
-          <div className={styles.featureIcon}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-              <line x1="8" y1="21" x2="16" y2="21" />
-              <line x1="12" y1="17" x2="12" y2="21" />
-            </svg>
-          </div>
-          <h3 className={styles.featureTitle}>Window Segregation</h3>
-          <p className={styles.featureDesc}>
-            Keep your workspaces organized. We group your tabs exactly how they are structured in your browser windows.
-          </p>
-        </div>
+        {/* 3D Vis Show */}
+        <div className={`${styles.showcase} ${styles.reveal}`}>
+          <div className={styles.floatingBrowser}>
+            <div className={styles.browserTop}>
+              <div className={styles.dots}>
+                <div className={styles.dot}></div>
+                <div className={styles.dot}></div>
+                <div className={styles.dot}></div>
+              </div>
+              <div className={styles.urlBar}>vault.local/secure</div>
+            </div>
 
-        <div className={styles.featureCard}>
-          <div className={styles.featureIcon}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="m22 2-7 20-4-9-9-4Z" />
-              <path d="M22 2 11 13" />
-            </svg>
+            <div className={styles.browserContent}>
+              <div className={styles.centerVault}>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  <path d="m9 12 2 2 4-4" />
+                </svg>
+              </div>
+
+              <div className={`${styles.syncTab} ${styles.syncTab1}`}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                localhost:3000
+              </div>
+
+              <div className={`${styles.syncTab} ${styles.syncTab2}`}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#39ff85" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+                Github - VaultTabs
+              </div>
+            </div>
           </div>
-          <h3 className={styles.featureTitle}>Tab Teleporting</h3>
-          <p className={styles.featureDesc}>
-            Send any active tab to another specific device with a single click. It opens instantly on the target machine.
-          </p>
         </div>
+      </header>
+
+      {/* CORE FEATURES (Alternating Layout) */}
+      <section className={styles.section}>
+        <div className={styles.sectionInner}>
+
+          <div className={`${styles.featureRow} ${styles.reveal}`}>
+            <div className={styles.featureText}>
+              <div className={styles.featureSubtitle}>Real-Time Flow</div>
+              <h2 className={styles.featureTitle}>Synchronize at the speed of thought.</h2>
+              <p className={styles.featureDesc}>
+                Our lightweight background engine updates your dashboard the split second you open, close, or switch tabs. Leave work on your laptop, and pick up exactly where you left off on your desktop.
+              </p>
+            </div>
+            <div className={styles.featureVisual}>
+              <div className={styles.glassCard}>
+                <svg width="100%" height="200" viewBox="0 0 400 200" fill="none">
+                  <path d="M50 100 Q 200 10 350 100" stroke="rgba(57, 255, 133, 0.4)" strokeWidth="4" strokeDasharray="10 10">
+                    <animate attributeName="stroke-dashoffset" from="100" to="0" dur="2s" repeatCount="indefinite" />
+                  </path>
+                  <circle cx="50" cy="100" r="20" fill="#1e1e1e" stroke="var(--green)" strokeWidth="2" />
+                  <circle cx="350" cy="100" r="20" fill="#1e1e1e" stroke="var(--green)" strokeWidth="2" />
+                  <rect x="35" y="85" width="30" height="30" rx="4" fill="var(--green)" opacity="0.2" />
+                  <rect x="335" y="85" width="30" height="30" rx="4" fill="var(--green)" opacity="0.2" />
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <div className={`${styles.featureRow} ${styles.reveal}`}>
+            <div className={styles.featureText}>
+              <div className={styles.featureSubtitle}>Teleportation</div>
+              <h2 className={styles.featureTitle}>Beam tasks directly to other screens.</h2>
+              <p className={styles.featureDesc}>
+                Found an interesting article on your phone but want to read it on your monitor? Hit the "Send" icon. It immediately pops open the target browser. No messy links, no email drafts.
+              </p>
+            </div>
+            <div className={styles.featureVisual}>
+              <div className={styles.glassCard}>
+                <svg width="100%" height="200" viewBox="0 0 400 200" fill="none">
+                  <rect x="50" y="40" width="120" height="120" rx="8" fill="var(--black-2)" stroke="var(--border)" />
+                  <rect x="230" y="40" width="120" height="120" rx="8" fill="var(--black-2)" stroke="var(--green)" />
+                  <path d="M120 100 L 280 100" stroke="var(--green)" strokeWidth="3" markerEnd="url(#arrow)">
+                    <animate attributeName="stroke-dashoffset" from="200" to="0" dur="1s" repeatCount="indefinite" strokeDasharray="200" />
+                  </path>
+                  <circle cx="280" cy="100" r="8" fill="var(--green)">
+                    <animate attributeName="r" values="8;16;8" dur="1s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite" />
+                  </circle>
+                </svg>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      {/* SECURITY GRID */}
+      <section className={styles.securitySection}>
+        <div className={`${styles.badge} ${styles.reveal}`}>Security Built-In</div>
+        <h2 className={`${styles.title} ${styles.reveal}`} style={{ fontSize: 'clamp(32px, 5vw, 56px)' }}>Zero-Knowledge Protocol</h2>
+        <p className={`${styles.description} ${styles.reveal}`} style={{ margin: '0 auto' }}>
+          Your browsing history is the most sensitive data you own. <br />That's why our servers physically cannot read it.
+        </p>
+
+        <div className={styles.secGrid}>
+          <div className={`${styles.secCard} ${styles.reveal}`}>
+            <div className={styles.secIcon}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+            </div>
+            <h4>End-to-End Encrypted</h4>
+            <p>Your master key is derived locally from your password using PBKDF2. Data is encrypted using AES-GCM *before* it leaves your browser.</p>
+          </div>
+
+          <div className={`${styles.secCard} ${styles.reveal}`}>
+            <div className={styles.secIcon}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+            </div>
+            <h4>Server-Blind</h4>
+            <p>Our PostgreSQL database stores only indecipherable blobs and salted hashes. Even in the event of a breach, your data is cryptographically secure.</p>
+          </div>
+
+          <div className={`${styles.secCard} ${styles.reveal}`}>
+            <div className={styles.secIcon}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+            </div>
+            <h4>Open Source Core</h4>
+            <p>Verify exactly how your data is treated. The entire Sync Engine, cryptography layer, and backend API are open for audit on GitHub.</p>
+          </div>
+        </div>
+      </section>
+
+      {/* FINAL CTA */}
+      <footer className={styles.footerCta}>
+        <div className={`${styles.reveal}`}>
+          <h2>Ready to upgrade your workflow?</h2>
+          {isLoggedIn ? (
+            <button className={styles.btnPrimary} style={{ margin: '0 auto' }} onClick={() => router.push('/dashboard')}>
+              Go to Dashboard
+            </button>
+          ) : (
+            <button className={styles.btnPrimary} style={{ margin: '0 auto' }} onClick={() => router.push('/login')}>
+              Create Secure Account
+            </button>
+          )}
+        </div>
+      </footer>
+
+      <div className={styles.footer}>
+        © {new Date().getFullYear()} VaultTabs. Open Source under MIT License.
       </div>
     </div>
   );
