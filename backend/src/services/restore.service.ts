@@ -12,7 +12,6 @@ export class RestoreService implements IRestoreService {
         private snapshotRepository: ISnapshotRepository
     ) {
         this.events = new EventEmitter();
-        // Increase max listeners since many devices might connect
         this.events.setMaxListeners(100);
     }
 

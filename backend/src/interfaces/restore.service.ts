@@ -1,3 +1,5 @@
+// Interface for restore service operations
+
 import { RestoreRequest } from './models.js';
 import { EventEmitter } from 'events';
 

@@ -1,3 +1,5 @@
+// Interface for user repository operations
+
 import { User } from './models.js';
 
 export interface IUserRepository {

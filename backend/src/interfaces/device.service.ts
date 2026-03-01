@@ -1,3 +1,5 @@
+// Interface for device management operations
+
 import { Device } from './models.js';
 
 export interface IDeviceService {

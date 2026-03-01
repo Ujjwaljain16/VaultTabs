@@ -1,3 +1,5 @@
+// Interface for restore repository operations
+
 import { RestoreRequest } from './models.js';
 
 export interface IRestoreRepository {

@@ -1,7 +1,4 @@
-/**
- * src/db/cleanup.ts
- * Database maintenance job.
- */
+// Database maintenance job
 
 import 'dotenv/config';
 import { fileURLToPath } from 'url';

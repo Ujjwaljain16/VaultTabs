@@ -1,8 +1,3 @@
-/**
- * src/index.ts
- * Unified HTTPS-enabled VaultTabs backend.
- */
-
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
@@ -24,7 +19,6 @@ import { runCleanup } from './db/cleanup.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// HTTPS config (disable on platforms like Render where SSL terminates at proxy)
 const isRender = process.env.RENDER === 'true';
 const HTTPS_ENABLED = !isRender && process.env.HTTPS_ENABLED !== 'false';
 

@@ -21,8 +21,6 @@ export class AccountService implements IAccountService {
             account: {
                 id: user.id,
                 email: user.email,
-                // snapshot_retention might not be in User interface if I didn't add it.
-                // Let's assume it is or cast.
                 snapshot_retention: (user as any).snapshot_retention,
                 has_recovery_key: !!(user as any).recovery_key_hash,
                 created_at: user.created_at,

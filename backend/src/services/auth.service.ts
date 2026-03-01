@@ -27,7 +27,6 @@ export class AuthService implements IAuthService {
             ...data,
             snapshot_retention: 50,
             password_hash: passwordHash,
-            // Overwrite the raw hash from the frontend with our scrypt hash
             recovery_key_hash: recoveryHashDb,
         });
 
@@ -42,7 +41,6 @@ export class AuthService implements IAuthService {
         const invalidError = new Error('Invalid credentials');
 
         if (!user) {
-            // Artificial delay is handled in the route for now, or could move here
             throw invalidError;
         }
 
@@ -82,7 +80,7 @@ export class AuthService implements IAuthService {
                 snapshot_retention: user.snapshot_retention || 50,
                 created_at: user.created_at,
             },
-            token: '', // Not needed for getMe usually
+            token: '',
             crypto: {
                 encrypted_master_key: user.encrypted_master_key,
                 master_key_iv: user.master_key_iv,

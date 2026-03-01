@@ -1,7 +1,4 @@
-/**
- * src/db/migrate.ts
- * Creates necessary database tables for VaultTabs.
- */
+// Creates necessary database tables for VaultTabs
 
 import sql from './client.js';
 
@@ -9,7 +6,7 @@ async function migrate() {
   console.log('[*] Running database migrations...\n');
 
   try {
-    // ── Users Table ──
+    // Users Table
     await sql`
       CREATE TABLE IF NOT EXISTS users (
         id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -38,7 +35,7 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS recovery_key_hash TEXT;
     `;
 
-    // ── Devices Table ──
+    // Devices Table
     await sql`
       CREATE TABLE IF NOT EXISTS devices (
         id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -57,7 +54,7 @@ async function migrate() {
     `;
     console.log('[+] Column "fingerprint" in devices ready');
 
-    // ── Snapshots Table ──
+    // Snapshots Table
     await sql`
       CREATE TABLE IF NOT EXISTS snapshots (
         id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -71,14 +68,14 @@ async function migrate() {
     `;
     console.log('[+] Table "snapshots" ready');
 
-    // ── Indexes ──
+    // Indexes
     await sql`CREATE INDEX IF NOT EXISTS idx_snapshots_user_device ON snapshots(user_id, device_id, captured_at DESC);`;
     await sql`CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id);`;
     await sql`CREATE INDEX IF NOT EXISTS idx_snapshots_device_captured ON snapshots(device_id, captured_at DESC);`;
     await sql`CREATE INDEX IF NOT EXISTS idx_snapshots_user_captured ON snapshots(user_id, captured_at DESC);`;
     console.log('[+] Indexes ready');
 
-    // ── Restore Requests Table ──
+    // Restore Requests Table
     await sql`
       CREATE TABLE IF NOT EXISTS restore_requests (
         id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -1,3 +1,5 @@
+// Interface for snapshot repository operations
+
 import { Snapshot } from './models.js';
 
 export interface ISnapshotRepository {

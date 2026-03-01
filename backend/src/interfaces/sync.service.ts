@@ -1,3 +1,5 @@
+// Interface for sync service operations
+
 import { Snapshot } from './models.js';
 
 export interface ISyncService {

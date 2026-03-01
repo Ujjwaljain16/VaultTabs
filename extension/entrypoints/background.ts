@@ -1,37 +1,23 @@
-/**
- * entrypoints/background.ts
- *
- * The background service worker manages event-driven syncing of tabs to the VaultTabs backend.
- * Uses a debounce mechanism and periodic fallback alarms to optimize network and CPU usage.
- */
+// The background service worker manages event-driven syncing of tabs to the VaultTabs backend.
+//   Uses a debounce mechanism and periodic fallback alarms to optimize network and CPU usage
 
 import { encryptSnapshot, decryptSnapshot, TabSnapshot } from '../utils/crypto';
 import { loadFromStorage, saveToStorage, loadMasterKey } from '../utils/storage';
 import { apiUploadSnapshot, apiHeartbeat, apiGetPendingRestore, apiCompleteRestore, apiConnectRestoreStream, apiRegisterDevice, getDeviceName } from '../utils/api';
 import { getBrowserFingerprint } from '../utils/fingerprint';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CONSTANTS
-// ─────────────────────────────────────────────────────────────────────────────
 
-// Alarm names — must be unique strings
 const ALARM_DEBOUNCE = 'vaulttabs-debounce';   // Fires 3s after last tab event
 const ALARM_FALLBACK = 'vaulttabs-fallback';   // Fires every 3 minutes as safety net
 const ALARM_RECONNECT = 'vaulttabs-reconnect';  // Fires if SSE drops
 
 const DEBOUNCE_SECONDS = 3;
 const FALLBACK_MINUTES = 3;
-const RECONNECT_SECONDS = 5;                   // Reconnect delay
+const RECONNECT_SECONDS = 5;               
 const MAX_SYNC_AGE_MS = FALLBACK_MINUTES * 60 * 1000;
 
 export default defineBackground(() => {
   console.log('[VaultTabs] Background service worker started');
-
-  // ── STARTUP: CHECK MASTER KEY IS STILL IN INDEXEDDB ───────────────────────
-  // When Chrome restarts, the service worker starts fresh.
-  // IndexedDB persists across restarts, BUT in rare cases it can be cleared
-  // (user cleared site data, extension was reinstalled, etc.).
-  // If the token exists but the master key is gone → tell popup to re-login.
   (async () => {
     const storage = await loadFromStorage();
     if (storage.is_logged_in && storage.master_key_stored) {
@@ -49,53 +35,29 @@ export default defineBackground(() => {
     }
   })();
 
-  // ── IN-MEMORY STATE ────────────────────────────────────────────────────────
-  // These live in memory while the service worker is alive.
-  // They're reset when the service worker is killed by Chrome (that's fine —
-  // the periodic alarm will wake us up and re-sync from scratch).
-
-  /** SHA-256 hash of the last successfully uploaded snapshot. Used to skip redundant uploads. */
   let lastUploadedHash: string | null = null;
-
-  /** True if a tab event has fired since the last sync. */
   let isDirty = false;
 
-  // ── SETUP PERSISTENT ALARMS ────────────────────────────────────────────────
   chrome.alarms.create(ALARM_FALLBACK, { periodInMinutes: FALLBACK_MINUTES });
 
-  // ── TAB EVENT LISTENERS ────────────────────────────────────────────────────
-  // All of these call markDirty() which starts the 3-second debounce.
-
-  // A new tab was opened
   chrome.tabs.onCreated.addListener(() => {
     markDirty('tab created');
   });
-
-  // A tab was closed
   chrome.tabs.onRemoved.addListener(() => {
     markDirty('tab removed');
   });
-
-  // A tab's URL, title, or status changed
-  // We filter to only URL changes — status changes fire constantly during page load
   chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
-    // changeInfo.url is set only when the tab navigates to a new URL
-    // changeInfo.title is set when the page title changes (after load)
     if (changeInfo.url || changeInfo.title) {
       markDirty('tab updated');
     }
   });
-
-  // A tab was moved to a different position in the window
   chrome.tabs.onMoved.addListener(() => {
     markDirty('tab moved');
   });
 
-  // A tab was moved between windows
   chrome.tabs.onAttached.addListener(() => markDirty('tab attached'));
   chrome.tabs.onDetached.addListener(() => markDirty('tab detached'));
 
-  // A new window was opened or closed
   chrome.windows.onCreated.addListener(() => markDirty('window created'));
   chrome.windows.onRemoved.addListener(() => markDirty('window removed'));
 
@@ -103,12 +65,10 @@ export default defineBackground(() => {
   // Switching which tab is active doesn't change the data we care about
   // (URLs, titles, open/closed state). Listening to it would cause unnecessary
   // debounce resets every time the user clicks a tab.
-
-  // ── ALARM LISTENER ─────────────────────────────────────────────────────────
   chrome.alarms.onAlarm.addListener(async (alarm) => {
 
     if (alarm.name === ALARM_DEBOUNCE) {
-      // Debounce timer expired — enough time has passed since the last tab event.
+      // Debounce timer expired enough time has passed since the last tab event.
       // Now actually do the sync.
       console.log('[VaultTabs] Debounce complete → syncing');
       await performSync('debounce');
@@ -122,8 +82,6 @@ export default defineBackground(() => {
         console.log(`[VaultTabs] Fallback alarm → syncing`);
         await performSync('fallback');
       }
-
-      // Safety net: always ensure restore stream is active during fallback wakeups
       setupRestoreStream();
     }
 
@@ -132,12 +90,9 @@ export default defineBackground(() => {
     }
   });
 
-  // ── MESSAGE LISTENER ───────────────────────────────────────────────────────
-  // Popup sends messages when user logs in or out
   chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'START_SYNC') {
       console.log('[VaultTabs] Login detected → immediate sync');
-      // Reset hash so we definitely upload on first login
       lastUploadedHash = null;
       isDirty = true;
       performSync('login');
@@ -153,32 +108,15 @@ export default defineBackground(() => {
     }
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // MARK DIRTY — called by every tab event
-  //
-  // Sets the dirty flag and resets the debounce alarm.
-  // If the user opens 10 tabs in 2 seconds:
-  //   - markDirty is called 10 times
-  //   - Each call resets the 3-second alarm back to 0
-  //   - The alarm only fires once, 3 seconds after the LAST tab event
-  //   - Result: 1 upload instead of 10
-  // ─────────────────────────────────────────────────────────────────────────────
-
   function markDirty(reason: string) {
     isDirty = true;
     console.log(`[VaultTabs] Tab change (${reason}) → debounce reset`);
-
-    // chrome.alarms minimum is 0.016 minutes (~1 second).
-    // We want 3 seconds = 0.05 minutes.
-    // Creating an alarm that already exists replaces it — this is the debounce mechanism.
     chrome.alarms.create(ALARM_DEBOUNCE, {
       delayInMinutes: DEBOUNCE_SECONDS / 60,
     });
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // PERFORM SYNC — the actual work
-  //
+  // PERFORM SYNC the actual work
   // Called by the debounce alarm or the fallback alarm.
   // Steps:
   //   1. Auth check
@@ -186,29 +124,24 @@ export default defineBackground(() => {
   //   3. Hash comparison (skip if unchanged)
   //   4. Encrypt
   //   5. Upload
-  // ─────────────────────────────────────────────────────────────────────────────
 
   async function performSync(trigger: string) {
     try {
-      // ── 1. AUTH CHECK ──────────────────────────────────────────────────────
       const storage = await loadFromStorage();
       if (!storage.is_logged_in || !storage.jwt_token || !storage.device_id) {
         console.log('[VaultTabs] Not logged in — skipping sync');
         isDirty = false;
         return;
       }
-
-      // ── 2. LOAD MASTER KEY ─────────────────────────────────────────────────
       const masterKey = await loadMasterKey();
       if (!masterKey) {
         console.warn('[VaultTabs] Master key missing — user may need to re-login');
         return;
       }
 
-      // ── 3. READ TABS ───────────────────────────────────────────────────────
+    
       const chromeTabs = await chrome.tabs.query({});
 
-      // Only capture HTTP/HTTPS tabs — skip chrome://, about:, extension pages
       const tabs: TabSnapshot[] = chromeTabs
         .filter(tab => tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://')))
         .map(tab => ({
@@ -227,16 +160,6 @@ export default defineBackground(() => {
         isDirty = false;
         return;
       }
-
-      // ── 4. HASH COMPARISON ─────────────────────────────────────────────────
-      // Serialize tabs to JSON, then SHA-256 hash it.
-      // Compare with the last uploaded hash.
-      // If identical → skip upload (nothing actually changed).
-      //
-      // WHY THIS MATTERS:
-      // Some tab events fire without changing real state.
-      // e.g. chrome.tabs.onUpdated fires during page load progress
-      // even if the URL didn't change. The hash catches these.
       const serialized = JSON.stringify(tabs);
       const currentHash = await hashString(serialized);
 
@@ -248,11 +171,9 @@ export default defineBackground(() => {
 
       console.log(`[VaultTabs] Hash changed — uploading ${tabs.length} tabs (trigger: ${trigger})`);
 
-      // ── 5. ENCRYPT ────────────────────────────────────────────────────────
       const capturedAt = new Date().toISOString();
       const { encryptedBlob, iv } = await encryptSnapshot(tabs, masterKey);
 
-      // ── 6. UPLOAD ─────────────────────────────────────────────────────────
       const result = await apiUploadSnapshot({
         device_id: storage.device_id,
         captured_at: capturedAt,
@@ -263,9 +184,6 @@ export default defineBackground(() => {
       if (!result.ok) {
         console.error('[VaultTabs] Upload failed:', result.error);
 
-        // AUTO-RECOVERY: If the server says this device doesn't belong to us,
-        // it usually means we switched accounts or the backend state changed.
-        // Try to re-verify identity using fingerprint.
         if (result.error?.includes('This device does not belong to your account')) {
           console.warn('[VaultTabs] Device identity mismatch — attempting auto-recovery...');
           const fingerprint = await getBrowserFingerprint();
@@ -276,13 +194,11 @@ export default defineBackground(() => {
             const newId = regResult.data.device.id;
             console.log('[VaultTabs] Device identity successfully recovered:', newId);
             await saveToStorage({ device_id: newId });
-            // The next fallback/debounce alarm will use the new ID
           }
         }
         return;
       }
 
-      // ── 7. SUCCESS ────────────────────────────────────────────────────────
       lastUploadedHash = currentHash;
       isDirty = false;
 
@@ -291,39 +207,28 @@ export default defineBackground(() => {
         last_sync_at: capturedAt,
         last_tab_count: tabs.length,
         sync_count: newCount,
-        last_error: undefined,   // Clear any previous error
+        last_error: undefined,
       });
 
       await apiHeartbeat(storage.device_id);
 
       console.log(`[VaultTabs] Synced ${tabs.length} tabs at ${capturedAt} (trigger: ${trigger}, total: ${newCount})`);
 
-      // Notify popup to refresh its display (if it's open)
       chrome.runtime.sendMessage({
         type: 'SYNC_COMPLETE',
         tabCount: tabs.length,
         capturedAt,
         syncCount: newCount,
-      }).catch(() => { /* popup not open — that's fine */ });
+      }).catch(() => { });
 
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
       console.error('[VaultTabs] Sync error:', errorMsg);
-      // Save the error so popup can show it
       await saveToStorage({ last_error: errorMsg }).catch(() => { });
-      // Keep isDirty = true — fallback alarm will retry
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
   // SERVER-SENT EVENTS (SSE) STREAMING
-  //
-  // Replaces the old 5-second polling interval! 
-  // Keeps an open connection to the backend. The backend pushes events to us
-  // instantly when the user clicks 'Restore to this device' on their phone.
-  // The backend also sends a 20s heartbeat, which effectively resets the 30s 
-  // idle timeout of the MV3 Service Worker, keeping it awake while Chrome runs!
-  // ─────────────────────────────────────────────────────────────────────────────
 
   let isStreamActive = false;
 
@@ -462,7 +367,6 @@ export default defineBackground(() => {
 
       const newWindowId = newWindow.id!;
 
-      // Open remaining tabs in that window
       for (let i = 1; i < sorted.length; i++) {
         await chrome.tabs.create({
           windowId: newWindowId,
@@ -473,16 +377,6 @@ export default defineBackground(() => {
       }
     }
   }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // HASH UTILITY
-  //
-  // SHA-256 hash of a string using the WebCrypto API.
-  // Returns a hex string like "a3f2bc9e..."
-  //
-  // Used for snapshot comparison only — not for security.
-  // We just need a fast, reliable way to detect content changes.
-  // ─────────────────────────────────────────────────────────────────────────────
 
   async function hashString(input: string): Promise<string> {
     const bytes = new TextEncoder().encode(input);
