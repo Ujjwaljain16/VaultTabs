@@ -603,3 +603,92 @@ input::placeholder { color: var(--text-3); }
   from { transform: translateY(100px); opacity: 0; }
   to   { transform: translateY(0); opacity: 1; }
 }
+/* ── RESTORE STATUS CONTENT (PWA Style) ────────────────── */
+#restore-status-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+}
+
+.restore-spinner {
+  width: 32px; height: 32px;
+  border: 3px solid var(--black-3);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.restore-title {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.restore-desc {
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.5;
+  text-align: center;
+}
+
+.restore-desc strong {
+  color: var(--text-2);
+}
+
+.restore-pulse {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.restore-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.restore-success-icon {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: var(--green-muted);
+  border: 1px solid var(--green-border);
+  color: var(--green);
+  font-size: 20px;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.restore-error-icon {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: var(--error-dim);
+  border: 1px solid rgba(255, 94, 94, 0.2);
+  color: var(--error);
+  font-size: 20px;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.restore-cancel-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  padding: 6px 16px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.restore-cancel-btn:hover {
+  border-color: var(--text-2);
+  color: var(--text-2);
+  background: var(--black-3);
+}

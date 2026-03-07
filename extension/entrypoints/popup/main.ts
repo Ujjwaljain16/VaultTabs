@@ -28,7 +28,7 @@ import { getBrowserFingerprint } from '../../utils/fingerprint';
 
 import {
   apiRegister, apiLogin, apiRegisterDevice, apiRenameDevice, getDeviceName,
-  apiGetDevices, apiCreateRestoreRequest, type Device
+  apiGetDevices, apiCreateRestoreRequest, apiGetRestoreStatus, type Device
 } from '../../utils/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -60,8 +60,8 @@ function setLoading(btn: HTMLButtonElement, loading: boolean) {
 }
 
 let currentTabs: chrome.tabs.Tab[] = [];
-let pendingSendUrl: string | null = null;
 let userDevices: Device[] = [];
+let restorePollInterval: ReturnType<typeof setInterval> | null = null;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INIT — runs once when popup opens
@@ -358,7 +358,7 @@ async function handleRegister(e: Event) {
     const finalDeviceName = deviceName || existing.device_name || getDeviceName();
 
     const fingerprint = await getBrowserFingerprint();
-    const deviceResult = await apiRegisterDevice(finalDeviceName, fingerprint);
+    const deviceResult = await apiRegisterDevice(finalDeviceName, fingerprint, existing.device_id);
     if (!deviceResult.ok || !deviceResult.data) {
       showError('reg-error', 'Account created but device registration failed. Please login.');
       return;
@@ -530,7 +530,7 @@ async function doLogin(email: string, password: string, errorElId: string, custo
   let deviceName = customDeviceName || existing.device_name || getDeviceName();
 
   const fingerprint = await getBrowserFingerprint();
-  const deviceResult = await apiRegisterDevice(deviceName, fingerprint);
+  const deviceResult = await apiRegisterDevice(deviceName, fingerprint, existing.device_id);
   if (!deviceResult.ok || !deviceResult.data) {
     showError(errorElId, 'Login ok but device registration failed. Try again.');
     return;
@@ -619,7 +619,6 @@ el('btn-cancel-rename').addEventListener('click', () => {
 
 el('btn-cancel-device-picker').addEventListener('click', () => {
   el('device-picker-overlay').classList.add('hidden');
-  pendingSendUrl = null;
 });
 
 el('btn-save-rename').addEventListener('click', handleRenameDevice);
@@ -667,7 +666,6 @@ async function handleRenameDevice() {
 
 async function showDevicePicker(url: string) {
   if (!url) return;
-  pendingSendUrl = url;
 
   const listEl = el('device-picker-list');
   listEl.innerHTML = '<div class="spinner" style="margin: 20px auto;"></div>';
@@ -708,23 +706,126 @@ async function showDevicePicker(url: string) {
 }
 
 async function handleSendToDevice(targetDeviceId: string, url: string) {
-  const listEl = el('device-picker-list');
-  listEl.innerHTML = '<div class="spinner" style="margin: 20px auto;"></div>';
+  const targetDevice = userDevices.find(d => d.id === targetDeviceId);
+  const targetName = targetDevice ? targetDevice.device_name : 'Device';
 
-  const result = await apiCreateRestoreRequest({
-    target_device_id: targetDeviceId,
-    target_url: url
-  });
-
-  if (!result.ok) {
-    alert('Failed to send tab: ' + (result.error || 'Unknown error'));
-    showDevicePicker(url); // show picker again
-    return;
-  }
-
+  renderRestoreOverlay('sending');
   el('device-picker-overlay').classList.add('hidden');
-  showToast('Tab sent!');
-  pendingSendUrl = null;
+
+  try {
+    const result = await apiCreateRestoreRequest({
+      target_device_id: targetDeviceId,
+      target_url: url
+    });
+
+    if (!result.ok || !result.data) {
+      renderRestoreOverlay('error', { message: result.error || 'Failed to send request' });
+      return;
+    }
+
+    const requestId = result.data.request_id;
+    startRestorePolling(requestId, targetName);
+
+  } catch (err) {
+    renderRestoreOverlay('error', { message: 'Network error' });
+  }
+}
+
+function startRestorePolling(requestId: string, deviceName: string) {
+  if (restorePollInterval) clearInterval(restorePollInterval);
+
+  renderRestoreOverlay('waiting', { deviceName });
+
+  const startTime = Date.now();
+  const TIMEOUT = 90_000;
+
+  restorePollInterval = setInterval(async () => {
+    // Timeout check
+    if (Date.now() - startTime > TIMEOUT) {
+      stopRestorePolling();
+      renderRestoreOverlay('error', { message: 'Timed out. Is the other device online?' });
+      return;
+    }
+
+    try {
+      const result = await apiGetRestoreStatus(requestId);
+      if (!result.ok || !result.data) return;
+
+      const req = result.data.request;
+      if (req.status === 'completed') {
+        stopRestorePolling();
+        renderRestoreOverlay('success', { deviceName });
+        setTimeout(() => el('restore-overlay').classList.add('hidden'), 5000);
+      } else if (req.status === 'failed') {
+        stopRestorePolling();
+        renderRestoreOverlay('error', { message: req.error_msg || 'Restore failed on target device' });
+      } else if (req.status === 'expired') {
+        stopRestorePolling();
+        renderRestoreOverlay('error', { message: 'Request expired' });
+      }
+    } catch (err) {
+      // Ignore polling errors
+    }
+  }, 2000);
+}
+
+function stopRestorePolling() {
+  if (restorePollInterval) {
+    clearInterval(restorePollInterval);
+    restorePollInterval = null;
+  }
+}
+
+function renderRestoreOverlay(phase: 'sending' | 'waiting' | 'success' | 'error', data?: any) {
+  const overlay = el('restore-overlay');
+  const content = el('restore-status-content');
+  overlay.classList.remove('hidden');
+
+  if (phase === 'sending') {
+    content.innerHTML = `
+      <div class="restore-spinner"></div>
+      <div class="restore-title">Sending request...</div>
+      <div class="restore-desc">Contacting the backend</div>
+    `;
+  } else if (phase === 'waiting') {
+    content.innerHTML = `
+      <div class="restore-spinner"></div>
+      <div class="restore-title">Waiting for desktop</div>
+      <div class="restore-desc">
+        The extension on <strong>${data.deviceName}</strong> will open your tab shortly.
+      </div>
+      <div class="restore-pulse">
+        <div class="restore-dot"></div>
+        <div class="restore-dot" style="animation-delay: 0.2s"></div>
+        <div class="restore-dot" style="animation-delay: 0.4s"></div>
+      </div>
+      <button class="restore-cancel-btn" id="btn-cancel-restore">Cancel</button>
+    `;
+    const cancelBtn = el('btn-cancel-restore');
+    cancelBtn.onclick = () => {
+      stopRestorePolling();
+      overlay.classList.add('hidden');
+    };
+  } else if (phase === 'success') {
+    content.innerHTML = `
+      <div class="restore-success-icon">✓</div>
+      <div class="restore-title">Tab restored!</div>
+      <div class="restore-desc">
+        Your tab is now open on <strong>${data.deviceName}</strong>.
+      </div>
+    `;
+  } else if (phase === 'error') {
+    content.innerHTML = `
+      <div class="restore-error-icon">✕</div>
+      <div class="restore-title">Restore failed</div>
+      <div class="restore-desc">${data.message}</div>
+      <button class="restore-cancel-btn" id="btn-dismiss-restore">Dismiss</button>
+    `;
+    const dismissBtn = el('btn-dismiss-restore');
+    dismissBtn.onclick = () => {
+      overlay.classList.add('hidden');
+    };
+  }
 }
 
 function showToast(text: string) {

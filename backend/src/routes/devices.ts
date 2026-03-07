@@ -8,6 +8,7 @@ const RegisterDeviceSchema = z.object({
     .min(1, 'device_name is required')
     .max(100, 'device_name must be under 100 characters'),
   fingerprint: z.string().optional(),
+  id: z.string().uuid().optional(),
 });
 
 type RegisterDeviceBody = z.infer<typeof RegisterDeviceSchema>;
@@ -28,8 +29,8 @@ export async function deviceRoutes(fastify: FastifyInstance, options: { containe
       });
     }
 
-    const { device_name, fingerprint } = parseResult.data;
-    const device = await deviceService.registerDevice(userId, device_name, fingerprint);
+    const { device_name, fingerprint, id: deviceId } = parseResult.data;
+    const device = await deviceService.registerDevice(userId, device_name, fingerprint, deviceId);
 
     return reply.status(201).send({
       message: 'Device registered',

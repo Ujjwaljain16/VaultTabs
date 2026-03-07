@@ -23,7 +23,8 @@ import {
   type DeviceResponse,
   type UploadSnapshotPayload,
   type PendingRestoreResponse,
-  type CompleteRestorePayload
+  type CompleteRestorePayload,
+  type RestoreStatusResponse
 } from '@vaulttabs/shared';
 
 // We alias this for internal use in apiGetPendingRestore
@@ -178,10 +179,10 @@ export async function apiGetMe() {
 // (Local DeviceResponse replaced)
 
 /** Register this browser as a device */
-export async function apiRegisterDevice(deviceName: string, fingerprint?: string) {
+export async function apiRegisterDevice(deviceName: string, fingerprint?: string, deviceId?: string) {
   return apiFetch<DeviceResponse>('/devices/register', {
     method: 'POST',
-    body: JSON.stringify({ device_name: deviceName, fingerprint }),
+    body: JSON.stringify({ device_name: deviceName, fingerprint, id: deviceId }),
   });
 }
 
@@ -262,6 +263,11 @@ export async function apiCreateRestoreRequest(payload: {
       body: JSON.stringify(payload),
     }
   );
+}
+
+/** Poll for restore request status */
+export async function apiGetRestoreStatus(requestId: string) {
+  return apiFetch<RestoreStatusResponse>(`/restore/${requestId}`);
 }
 
 // ── SERVER SENT EVENTS (SSE) STREAMING ───────────────────────────────────────

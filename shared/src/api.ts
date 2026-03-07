@@ -29,6 +29,12 @@ export interface AuthResponse {
 
 export interface LoginResponse extends AuthResponse { }
 
+export interface RegisterDevicePayload {
+    device_name: string;
+    fingerprint?: string;
+    id?: string;
+}
+
 export interface DeviceResponse {
     device: Device;
 }
