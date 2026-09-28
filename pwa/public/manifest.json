@@ -1,7 +1,7 @@
 {
   "name": "VaultTabs",
   "short_name": "VaultTabs",
-  "description": "Zero-knowledge cross-browser tab sync",
+  "description": "Cross-browser tab sync with client-side encrypted snapshots",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#080808",

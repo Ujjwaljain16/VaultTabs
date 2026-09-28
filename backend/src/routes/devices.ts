@@ -7,7 +7,7 @@ const RegisterDeviceSchema = z.object({
   device_name: z.string()
     .min(1, 'device_name is required')
     .max(100, 'device_name must be under 100 characters'),
-  fingerprint: z.string().optional(),
+  fingerprint: z.string().max(128).optional(),
   id: z.string().uuid().optional(),
 });
 

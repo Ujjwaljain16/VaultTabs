@@ -235,7 +235,7 @@ export default function RegisterPage() {
                 <div className={styles.zkNote}>
                     <span className={styles.zkIcon}>◈</span>
                     <span>
-                        VaultTabs is End-to-End Encrypted. Your password controls your personal Master Key. If you forget your password and lose your recovery code, data cannot be recovered.
+                        Tab snapshots are encrypted in your browser with a random Master Key that your password protects. Your password is also sent to the server over HTTPS to sign you in, so choose a unique one. If you forget your password and lose your recovery code, data cannot be recovered.
                     </span>
                 </div>
             </div>

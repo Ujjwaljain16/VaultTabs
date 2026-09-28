@@ -143,6 +143,8 @@ export default defineBackground(() => {
       const chromeTabs = await chrome.tabs.query({});
 
       const tabs: TabSnapshot[] = chromeTabs
+        // Never capture private/incognito tabs (only relevant if the user enabled the extension there)
+        .filter(tab => !tab.incognito)
         .filter(tab => tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://')))
         .map(tab => ({
           id: tab.id ?? 0,
@@ -296,7 +298,14 @@ export default defineBackground(() => {
       }
 
       // Open tabs (either one specific URL or the whole snapshot)
-      await openRestoredTabs(tabs, req.target_url);
+      try {
+        await openRestoredTabs(tabs, req.target_url);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Restore failed';
+        console.error('[VaultTabs] Restore refused:', msg);
+        await apiCompleteRestore(req.id, 'failed', msg);
+        return;
+      }
 
       // Mark completed on backend
       await apiCompleteRestore(req.id, 'completed');
@@ -329,18 +338,33 @@ export default defineBackground(() => {
   // We recreate the original window structure.
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async function openRestoredTabs(tabs: TabSnapshot[], targetUrl?: string) {
+  // Only http(s) URLs are ever opened. Snapshot contents are authenticated (AES-GCM) but we
+  // still refuse anything else (javascript:, file:, chrome:, data:) as defence in depth.
+  function isOpenableUrl(url: string | undefined): url is string {
+    return typeof url === 'string' && /^https?:\/\//i.test(url);
+  }
+
+  async function openRestoredTabs(allTabs: TabSnapshot[], targetUrl?: string) {
+    const tabs = allTabs.filter(t => isOpenableUrl(t.url));
+
     if (targetUrl) {
+      // "Send tab to device": target_url arrives from the server in PLAINTEXT (it is not covered
+      // by the snapshot's encryption and is NOT necessarily part of the snapshot). A compromised
+      // server could therefore ask us to open any http(s) page. We at least refuse other schemes.
+      if (!isOpenableUrl(targetUrl)) {
+        throw new Error('Requested URL is not http(s) - refusing to open it');
+      }
       console.log(`[VaultTabs] Single site restore: ${targetUrl}`);
-      // Find the tab in the snapshot to get original metadata if possible,
-      // though for a single URL we can just open it.
-      const existingTab = tabs.find(t => t.url === targetUrl);
 
       await chrome.windows.create({
         url: targetUrl,
         focused: true,
       });
       return;
+    }
+
+    if (tabs.length === 0) {
+      throw new Error('Snapshot contains no restorable http(s) tabs');
     }
 
     // Group tabs by original windowId

@@ -6,7 +6,7 @@ import { authenticate } from '../middleware/auth.js';
 const UploadSnapshotSchema = z.object({
   device_id: z.string().uuid('device_id must be a valid UUID'),
   captured_at: z.string().datetime('captured_at must be an ISO datetime string'),
-  iv: z.string().min(1, 'iv is required'),
+  iv: z.string().min(1, 'iv is required').max(64, 'iv too long'),
   encrypted_blob: z.string().min(1).max(500_000, 'Snapshot blob too large (max 500KB)'),
 });
 
@@ -67,8 +67,8 @@ export async function snapshotRoutes(fastify: FastifyInstance, options: { contai
     const { userId } = request.user;
     const { device_id, limit = '20' } = request.query;
 
-    if (!device_id) {
-      return reply.status(400).send({ error: 'device_id query param is required' });
+    if (!device_id || !z.string().uuid().safeParse(device_id).success) {
+      return reply.status(400).send({ error: 'device_id query param is required (UUID)' });
     }
 
     const limitNum = Math.min(50, Math.max(1, parseInt(limit) || 20));

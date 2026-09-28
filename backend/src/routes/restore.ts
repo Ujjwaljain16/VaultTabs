@@ -2,6 +2,10 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { Container } from '../container.js';
 import { authenticate } from '../middleware/auth.js';
+import { isOriginAllowed } from '../middleware/cors.js';
+
+const DeviceIdQuery = z.object({ device_id: z.string().uuid('device_id must be a valid UUID') });
+const RequestIdParam = z.object({ id: z.string().uuid('id must be a valid UUID') });
 
 export async function restoreRoutes(fastify: FastifyInstance, options: { container: Container }) {
   const { restoreService } = options.container;
@@ -17,7 +21,9 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
       source_device_id: z.string().uuid().optional(),
       target_device_id: z.string().uuid(),
       snapshot_id: z.string().uuid().optional(),
-      target_url: z.string().url().optional(),
+      // target_url is stored in PLAINTEXT on the server (see README "Security model").
+      // Only http(s) URLs are accepted.
+      target_url: z.string().url().max(2048).refine(u => /^https?:\/\//i.test(u), 'target_url must be http(s)').optional(),
     });
 
     const parsed = schema.safeParse(request.body);
@@ -48,17 +54,23 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
     preHandler: [authenticate],
   }, async (request, reply) => {
     const { userId } = request.user;
-    const { device_id } = request.query;
-
-    if (!device_id) {
-      return reply.status(400).send({ error: 'device_id query param required' });
+    const parsedQuery = DeviceIdQuery.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return reply.status(400).send({ error: 'device_id query param required (UUID)' });
     }
+    const { device_id } = parsedQuery.data;
 
     // Set headers for Server-Sent Events (SSE)
     reply.raw.setHeader('Content-Type', 'text/event-stream');
     reply.raw.setHeader('Cache-Control', 'no-cache');
     reply.raw.setHeader('Connection', 'keep-alive');
-    reply.raw.setHeader('Access-Control-Allow-Origin', '*');
+    // reply.raw bypasses the CORS plugin, so echo the origin only if it is on the allow-list
+    // (never "*"). Requests without an Origin header (the extension) need no CORS headers.
+    const origin = request.headers.origin;
+    if (origin && isOriginAllowed(origin)) {
+      reply.raw.setHeader('Access-Control-Allow-Origin', origin);
+      reply.raw.setHeader('Vary', 'Origin');
+    }
     reply.raw.flushHeaders();
 
     // Initial Check
@@ -132,11 +144,11 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
     preHandler: [authenticate],
   }, async (request, reply) => {
     const { userId } = request.user;
-    const { device_id } = request.query;
-
-    if (!device_id) {
-      return reply.status(400).send({ error: 'device_id query param required' });
+    const parsedQuery = DeviceIdQuery.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return reply.status(400).send({ error: 'device_id query param required (UUID)' });
     }
+    const { device_id } = parsedQuery.data;
 
     const pending = await restoreService.getPendingWithSnapshot(userId, device_id);
 
@@ -169,11 +181,11 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
 
     const schema = z.object({
       status: z.enum(['completed', 'failed']),
-      error_msg: z.string().optional(),
+      error_msg: z.string().max(500).optional(),
     });
 
     const parsed = schema.safeParse(request.body);
-    if (!parsed.success) {
+    if (!parsed.success || !RequestIdParam.safeParse(request.params).success) {
       return reply.status(400).send({ error: 'Validation failed' });
     }
 
@@ -196,6 +208,10 @@ export async function restoreRoutes(fastify: FastifyInstance, options: { contain
   }, async (request, reply) => {
     const { userId } = request.user;
     const { id } = request.params;
+
+    if (!RequestIdParam.safeParse(request.params).success) {
+      return reply.status(404).send({ error: 'Restore request not found' });
+    }
 
     try {
       const req = await restoreService.getRequestStatus(userId, id);

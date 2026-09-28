@@ -1,31 +1,35 @@
-# pwa/Dockerfile
+# pwa/dockerfile
 #
-# Multi-stage Next.js production build.
-# Uses Next.js standalone output for minimal image size (~80MB vs ~300MB).
+# Multi-stage Next.js production build. Build context is the REPO ROOT (see docker-compose.yml)
+# because the PWA imports types from the @vaulttabs/shared workspace package.
+# Uses Next.js standalone output for a small runtime image. next.config.js pins
+# outputFileTracingRoot to the repo root, so the standalone server ends up at pwa/server.js.
 
-# ── Stage 1: Dependencies ─────────────────────────────────────────────────────
-FROM node:20-alpine AS deps
-
-WORKDIR /build
-
-COPY package.json package-lock.json* ./
-RUN npm ci --ignore-scripts
-
-# ── Stage 2: Build ────────────────────────────────────────────────────────────
+# ── Stage 1: Build ────────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 
 WORKDIR /build
 
-COPY --from=deps /build/node_modules ./node_modules
-COPY . .
+COPY package.json package-lock.json ./
+COPY shared/package.json shared/
+COPY backend/package.json backend/
+COPY extension/package.json extension/
+COPY pwa/package.json pwa/
 
-# Set a placeholder API URL — will be overridden at runtime via environment
-ENV NEXT_PUBLIC_API_URL=http://localhost:3000/api/v1
+RUN npm ci --ignore-scripts --workspace=shared --workspace=pwa
+
+COPY shared shared
+COPY pwa pwa
+
+# NEXT_PUBLIC_* values are inlined into the browser bundle at BUILD time, so the API URL must be
+# supplied as a build arg (docker-compose passes it). It must be reachable from the user's browser.
+ARG NEXT_PUBLIC_API_URL=http://localhost:3000/api/v1
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN npm run build
+RUN npm run build --workspace=pwa
 
-# ── Stage 3: Runner ───────────────────────────────────────────────────────────
+# ── Stage 2: Runner ───────────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
 
 RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
@@ -37,10 +41,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3001
 ENV HOSTNAME=0.0.0.0
 
-# Copy only what Next.js standalone output needs
-COPY --from=builder /build/public ./public
-COPY --from=builder --chown=nextjs:nodejs /build/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /build/.next/static ./.next/static
+# Standalone output (monorepo layout: server at pwa/server.js) + static assets + public files
+COPY --from=builder --chown=nextjs:nodejs /build/pwa/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /build/pwa/.next/static ./pwa/.next/static
+COPY --from=builder --chown=nextjs:nodejs /build/pwa/public ./pwa/public
 
 USER nextjs
 
@@ -49,4 +53,4 @@ EXPOSE 3001
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
   CMD wget -qO- http://localhost:3001 || exit 1
 
-CMD ["node", "server.js"]
+CMD ["node", "pwa/server.js"]

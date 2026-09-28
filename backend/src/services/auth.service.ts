@@ -3,6 +3,14 @@ import { IUserRepository } from '../interfaces/user.repository.js';
 import { hashPassword, verifyPassword } from '../crypto/serverCrypto.js';
 import { User } from '../interfaces/models.js';
 
+// Used to burn the same scrypt time when the email is unknown, so response timing
+// does not reveal whether an account exists.
+let dummyHashPromise: Promise<string> | undefined;
+function getDummyHash(): Promise<string> {
+    dummyHashPromise ??= hashPassword('vaulttabs-dummy-password');
+    return dummyHashPromise;
+}
+
 export class AuthService implements IAuthService {
     constructor(
         private userRepository: IUserRepository,
@@ -32,7 +40,8 @@ export class AuthService implements IAuthService {
 
         const token = this.jwtSigner({ userId: user.id, email: user.email });
 
-        const { password_hash, ...userResult } = user;
+        // Never return server-side secrets/hashes to the client.
+        const { password_hash, recovery_key_hash, ...userResult } = user;
         return { user: userResult, token };
     }
 
@@ -41,6 +50,7 @@ export class AuthService implements IAuthService {
         const invalidError = new Error('Invalid credentials');
 
         if (!user) {
+            await verifyPassword(password_plaintext, await getDummyHash());
             throw invalidError;
         }
 
@@ -100,7 +110,7 @@ export class AuthService implements IAuthService {
             recovery_encrypted_master_key: user.recovery_encrypted_master_key,
             recovery_key_iv: user.recovery_key_iv,
             recovery_key_salt: user.recovery_key_salt,
-            recovery_key_hash: user.recovery_key_hash,
+            // recovery_key_hash (the server-side verifier) is intentionally NOT returned.
         };
     }
 }

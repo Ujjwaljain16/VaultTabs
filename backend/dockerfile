@@ -1,28 +1,31 @@
-# backend/Dockerfile
+# backend/dockerfile
+#
+# Build context is the REPO ROOT (see docker-compose.yml): the backend depends on the
+# @vaulttabs/shared workspace package, which lives outside backend/.
 #
 # Multi-stage build:
-#   Stage 1 (builder) — installs all deps, compiles TypeScript
-#   Stage 2 (runner)  — copies only the compiled output + prod deps
-#
-# Result: ~120MB image instead of ~500MB with all devDeps
+#   Stage 1 (builder) - installs workspace deps, compiles shared + backend TypeScript
+#   Stage 2 (runner)  - production deps + compiled output only
 
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 
 WORKDIR /build
 
-# Copy package files first (better layer caching)
-COPY package.json package-lock.json* ./
+# Workspace manifests first (better layer caching). All four are needed so npm can
+# validate the root lockfile, even though only backend + shared are installed.
+COPY package.json package-lock.json ./
+COPY shared/package.json shared/
+COPY backend/package.json backend/
+COPY extension/package.json extension/
+COPY pwa/package.json pwa/
 
-# Install ALL dependencies (including devDeps for TypeScript)
-RUN npm ci --ignore-scripts
+RUN npm ci --ignore-scripts --workspace=shared --workspace=backend
 
-# Copy source
-COPY tsconfig.json ./
-COPY src ./src
+COPY shared shared
+COPY backend backend
 
-# Compile TypeScript → dist/
-RUN npx tsc --project tsconfig.json
+RUN npm run build --workspace=shared && npm run build --workspace=backend
 
 # ── Stage 2: Production runner ────────────────────────────────────────────────
 FROM node:20-alpine AS runner
@@ -32,24 +35,28 @@ RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
 
 WORKDIR /app
 
-# Copy package files
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json ./
+COPY shared/package.json shared/
+COPY backend/package.json backend/
+COPY extension/package.json extension/
+COPY pwa/package.json pwa/
 
 # Install ONLY production dependencies
-RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+RUN npm ci --omit=dev --ignore-scripts --workspace=shared --workspace=backend && npm cache clean --force
 
-# Copy compiled output from builder
-COPY --from=builder /build/dist ./dist
+# Compiled output. (shared/dist is required at runtime: backend re-exports it.)
+COPY --from=builder /build/shared/dist shared/dist
+COPY --from=builder /build/backend/dist backend/dist
+
+WORKDIR /app/backend
 
 # Switch to non-root
 USER nodejs
 
-# Expose port
 EXPOSE 3000
 
-# Health check
 HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=3 \
   CMD wget -qO- http://localhost:3000/health || exit 1
 
-# Start the compiled server
-CMD ["node", "dist/index.js"]
+# Apply (idempotent) migrations, then start the server.
+CMD ["sh", "-c", "node dist/db/migrate.js && node dist/index.js"]

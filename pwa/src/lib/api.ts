@@ -89,7 +89,6 @@ export function apiGetRecoveryMaterial(email: string) {
     recovery_encrypted_master_key: string;
     recovery_key_iv: string;
     recovery_key_salt: string;
-    recovery_key_hash: string;
   }>('/auth/recovery-material', {
     method: 'POST',
     body: JSON.stringify({ email }),

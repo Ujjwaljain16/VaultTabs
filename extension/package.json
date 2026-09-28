@@ -1,7 +1,7 @@
 {
   "name": "vaulttabs-extension",
   "version": "0.1.0",
-  "description": "VaultTabs browser extension - zero knowledge tab sync",
+  "description": "VaultTabs browser extension - client-side encrypted tab sync",
   "scripts": {
     "dev": "wxt",
     "dev:firefox": "wxt -b firefox",

@@ -1,0 +1,15 @@
+# Build context is the repo root (see docker-compose.yml). Keep secrets and local build output out.
+**/node_modules
+**/dist
+**/.next
+**/.output
+**/.wxt
+.git
+.env
+**/.env
+**/.env.*
+!**/.env.example
+certs
+*.pem
+*.log
+**/.DS_Store

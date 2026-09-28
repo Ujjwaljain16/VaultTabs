@@ -39,7 +39,8 @@ export type { Device, RestoreRequest };
 // Change API_BASE_URL to your production URL when you deploy the backend
 // ─────────────────────────────────────────────────────────────────────────────
 
-const API_BASE_URL = (import.meta.env as any).VITE_API_URL || 'https://100.129.163.119:3000/api/v1';
+// Set VITE_API_URL at build time (see .env.example). The fallback is local development only.
+const API_BASE_URL = (import.meta.env as any).VITE_API_URL || 'https://localhost:3000/api/v1';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BASE FETCH WRAPPER

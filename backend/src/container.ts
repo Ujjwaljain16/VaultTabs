@@ -29,7 +29,7 @@ export function createContainer(fastify: FastifyInstance) {
 
     const syncService = new SyncService(snapshotRepository, deviceRepository, userRepository);
 
-    const restoreService = new RestoreService(restoreRepository, snapshotRepository);
+    const restoreService = new RestoreService(restoreRepository, snapshotRepository, deviceRepository);
 
     const accountService = new AccountService(userRepository, deviceRepository, snapshotRepository);
 

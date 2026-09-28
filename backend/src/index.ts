@@ -14,6 +14,7 @@ import { snapshotRoutes } from './routes/snapshots.js';
 import { restoreRoutes } from './routes/restore.js';
 import { accountRoutes } from './routes/account.js';
 import { createContainer } from './container.js';
+import { isOriginAllowed } from './middleware/cors.js';
 import { runCleanup } from './db/cleanup.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -26,7 +27,9 @@ let httpsOptions: { key: Buffer; cert: Buffer } | undefined;
 
 if (HTTPS_ENABLED) {
   const certDir = path.resolve(__dirname, '../../certs');
-  const files = fs.readdirSync(certDir).sort();
+  // Local-development certificates (mkcert) are NOT committed to the repo.
+  // Generate them with: mkcert <your-ip-or-hostname>   (run inside /certs)
+  const files = fs.existsSync(certDir) ? fs.readdirSync(certDir).sort() : [];
   const hostIp = process.env.PUBLIC_IP || '';
 
   const keyFile = files.find(f => f.includes('key.pem') && (hostIp && f.startsWith(hostIp))) ||
@@ -49,8 +52,13 @@ if (HTTPS_ENABLED) {
   };
 }
 
+const JWT_SECRET_PLACEHOLDERS = new Set(['your_64_char_hex_secret_here', 'changeme', 'secret']);
 if (!process.env.JWT_SECRET) {
   console.error('\n[!] JWT_SECRET is not set. Generate one:\n  node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  process.exit(1);
+}
+if (process.env.JWT_SECRET.length < 32 || JWT_SECRET_PLACEHOLDERS.has(process.env.JWT_SECRET)) {
+  console.error('\n[!] JWT_SECRET is a placeholder or shorter than 32 characters. Generate a real one:\n  node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
   process.exit(1);
 }
 if (!process.env.DATABASE_URL) {
@@ -68,6 +76,8 @@ async function buildServer() {
       }),
     },
     bodyLimit: 1_048_576,
+    // Only trust X-Forwarded-* headers when explicitly running behind a reverse proxy.
+    trustProxy: process.env.TRUST_PROXY === 'true',
   });
 
   await server.register(helmet, {
@@ -79,20 +89,7 @@ async function buildServer() {
 
   await server.register(cors, {
     origin: (origin, cb) => {
-      if (!origin || process.env.NODE_ENV !== 'production') {
-        cb(null, true);
-        return;
-      }
-      const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean);
-      const isAllowed = allowedOrigins.some(allowed => {
-        if (allowed.includes('*')) {
-          const regex = new RegExp('^' + allowed.replace(/\*/g, '.*') + '$');
-          return regex.test(origin);
-        }
-        return allowed === origin;
-      });
-
-      if (isAllowed) {
+      if (isOriginAllowed(origin)) {
         cb(null, true);
       } else {
         cb(new Error('Not allowed by CORS'), false);
@@ -107,8 +104,9 @@ async function buildServer() {
     global: true,
     max: 100,
     timeWindow: '1 minute',
-    keyGenerator: (request) =>
-      request.headers['x-forwarded-for'] as string || request.ip,
+    // request.ip honours X-Forwarded-For only when TRUST_PROXY=true (see trustProxy above).
+    // Never key on the raw header: a client could rotate it to evade the limit.
+    keyGenerator: (request) => request.ip,
     errorResponseBuilder: (_request, context) => ({
       error: 'Too many requests',
       message: `Rate limit exceeded. Try again in ${Math.ceil(context.ttl / 1000)} seconds.`,
@@ -118,6 +116,8 @@ async function buildServer() {
 
   await server.register(jwt, {
     secret: process.env.JWT_SECRET as string,
+    sign: { algorithm: 'HS256', expiresIn: process.env.JWT_EXPIRY || '30d' },
+    verify: { algorithms: ['HS256'] },
   });
 
   const container = createContainer(server);

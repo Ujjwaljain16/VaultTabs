@@ -3,7 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'VaultTabs',
-  description: 'Zero-knowledge cross-browser tab sync',
+  description: 'Cross-browser tab sync with client-side encrypted snapshots',
   manifest: '/manifest.json',
   icons: {
     icon: '/favicon.png',

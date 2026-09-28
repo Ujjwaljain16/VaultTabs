@@ -38,7 +38,7 @@ export default defineConfig({
 
   manifest: {
     name: 'VaultTabs',
-    description: 'Zero-knowledge cross-browser tab sync',
+    description: 'Cross-browser tab sync with client-side encrypted snapshots',
     version: '0.1.0',
     manifest_version: 2,
 
@@ -66,7 +66,6 @@ export default defineConfig({
     host_permissions: [
       'http://localhost:3000/*',
       'https://localhost:3000/*',
-      'https://100.129.163.119:3000/*',
       'https://*/*',
     ],
   },

@@ -87,7 +87,7 @@ export default function RootPage() {
         <div className={`${styles.heroContent} ${styles.reveal}`}>
           <div className={styles.badge}>
             <div className={styles.badgePulse}></div>
-            Zero-Knowledge Architecture
+            Client-Side Encrypted Snapshots
           </div>
 
           <h1 className={styles.title}>
@@ -97,8 +97,8 @@ export default function RootPage() {
 
           <p className={styles.description}>
             Seamlessly sync your active workspaces across all your devices.
-            Send specific tabs instantly where you need them. Secure, fast,
-            and entirely private—we never see your data.
+            Send specific tabs instantly where you need them. Tab snapshots are
+            encrypted in your browser before upload, so the stored data is ciphertext.
           </p>
 
           <div className={styles.ctas}>
@@ -227,7 +227,7 @@ export default function RootPage() {
           <div className={`${styles.stepCard} ${styles.reveal}`}>
             <div className={styles.stepNumber}>02</div>
             <h3>Create an Account</h3>
-            <p>Your password generates a local Master Key. Your tabs are encrypted before leaving the browser.</p>
+            <p>A random Master Key is generated in your browser and protected by your password. Your tab snapshots are encrypted with it before upload.</p>
           </div>
           <div className={`${styles.stepCard} ${styles.reveal}`}>
             <div className={styles.stepNumber}>03</div>
@@ -240,9 +240,9 @@ export default function RootPage() {
       {/* SECURITY GRID */}
       <section className={styles.securitySection}>
         <div className={`${styles.badge} ${styles.reveal}`}>Security Built-In</div>
-        <h2 className={`${styles.title} ${styles.reveal}`} style={{ fontSize: 'clamp(32px, 5vw, 56px)' }}>Zero-Knowledge Protocol</h2>
+        <h2 className={`${styles.title} ${styles.reveal}`} style={{ fontSize: 'clamp(32px, 5vw, 56px)' }}>Encryption Model</h2>
         <p className={`${styles.description} ${styles.reveal}`} style={{ margin: '0 auto' }}>
-          Your browsing habits are deeply personal. <br />Our architecture ensures your data remains encrypted and inaccessible to anyone—even us.
+          Your browsing habits are deeply personal. <br />Snapshots are stored as ciphertext. Read the security model on GitHub for exactly what the server can and cannot see.
         </p>
 
         <div className={styles.secGrid}>
@@ -250,16 +250,16 @@ export default function RootPage() {
             <div className={styles.secIcon}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
             </div>
-            <h4>End-to-End Encrypted</h4>
-            <p>Your master key is derived locally from your password using PBKDF2. Data is encrypted using AES-GCM *before* it leaves your browser.</p>
+            <h4>Client-Side Encrypted</h4>
+            <p>A random master key encrypts your tab snapshots with AES-256-GCM before upload. The master key is wrapped with a key derived from your password (PBKDF2, 100k rounds).</p>
           </div>
 
           <div className={`${styles.secCard} ${styles.reveal}`}>
             <div className={styles.secIcon}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
             </div>
-            <h4>Server-Blind</h4>
-            <p>Our PostgreSQL database stores only indecipherable blobs and salted hashes. Even in the event of a breach, your data is cryptographically secure.</p>
+            <h4>Ciphertext at Rest</h4>
+            <p>The database stores encrypted snapshots, your wrapped master key and a salted password hash. Caveat: your password is sent to the server (over HTTPS) at sign-in, so this is not zero-knowledge. Device names, timestamps and snapshot sizes are visible to the server.</p>
           </div>
 
           <div className={`${styles.secCard} ${styles.reveal}`}>

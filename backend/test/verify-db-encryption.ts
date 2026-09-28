@@ -5,7 +5,9 @@ async function verify() {
     try {
         const snaps = await sql`SELECT encrypted_blob FROM snapshots LIMIT 1`;
         if (snaps.length > 0) {
-            console.log('--- Zero-Knowledge Audit: DB Content Verification ---');
+            console.log('--- Snapshot ciphertext sanity check ---');
+            console.log('NOTE: this only checks that the stored blob is not raw JSON. It does NOT prove the server');
+            console.log('cannot decrypt it: the account password is sent to the server (see README Security model).');
             console.log('Sample Encrypted Blob (first 50 chars):');
             console.log(snaps[0].encrypted_blob.substring(0, 50) + '...');
 
@@ -14,7 +16,7 @@ async function verify() {
             console.log('Contains plaintext keywords ("url", "title"):', isPlaintext);
 
             if (!isPlaintext) {
-                console.log('Verification: SUCCESS - Data is correctly encrypted.');
+                console.log('Verification: blob does not look like plaintext JSON.');
             } else {
                 console.error('Verification: FAILURE - Plaintext data leaked into snapshots table!');
             }

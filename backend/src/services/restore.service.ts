@@ -1,5 +1,6 @@
 import { IRestoreService } from '../interfaces/restore.service.js';
 import { IRestoreRepository } from '../interfaces/restore.repository.js';
+import { IDeviceRepository } from '../interfaces/device.repository.js';
 import { ISnapshotRepository } from '../interfaces/snapshot.repository.js';
 import { RestoreRequest } from '../interfaces/models.js';
 import { EventEmitter } from 'events';
@@ -9,13 +10,20 @@ export class RestoreService implements IRestoreService {
 
     constructor(
         private restoreRepository: IRestoreRepository,
-        private snapshotRepository: ISnapshotRepository
+        private snapshotRepository: ISnapshotRepository,
+        private deviceRepository: IDeviceRepository
     ) {
         this.events = new EventEmitter();
         this.events.setMaxListeners(100);
     }
 
     async createRequest(userId: string, targetDeviceId: string, snapshotId?: string, sourceDeviceId?: string, targetUrl?: string): Promise<RestoreRequest> {
+        // 0. The target device must belong to the caller
+        const targetDevice = await this.deviceRepository.findByDeviceId(targetDeviceId);
+        if (!targetDevice || targetDevice.user_id !== userId) {
+            throw new Error('Target device not found');
+        }
+
         // 1. Get snapshot (latest if not specified)
         let snapshot;
         if (snapshotId) {
@@ -63,12 +71,16 @@ export class RestoreService implements IRestoreService {
     }
 
     async completeRequest(userId: string, requestId: string, status: 'completed' | 'failed', errorMsg?: string): Promise<void> {
+        const request = await this.restoreRepository.findById(requestId);
+        if (!request || request.user_id !== userId) {
+            throw new Error('Restore request not found');
+        }
         await this.restoreRepository.updateStatus(requestId, status, errorMsg);
     }
 
     async getRequestStatus(userId: string, requestId: string): Promise<RestoreRequest> {
         const request = await this.restoreRepository.findById(requestId);
-        if (!request) {
+        if (!request || request.user_id !== userId) {
             throw new Error('Restore request not found');
         }
         return request;

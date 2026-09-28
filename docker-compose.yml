@@ -1,22 +1,23 @@
 # docker-compose.yml
 #
-# Runs the full VaultTabs stack with one command:
-#   docker compose up
+# Runs the VaultTabs stack:
+#   docker compose up -d --build
 #
 # Services:
-#   postgres  → Database (port 5432)
-#   backend   → Fastify API (port 3000)
-#   pwa       → Next.js PWA (port 3001)
-#
-# Production mode:
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up
+#   postgres  -> Database (bound to 127.0.0.1:5432 only; not reachable from the network)
+#   backend   -> Fastify API (port 3000, plain HTTP - put a TLS reverse proxy in front for real use)
+#   pwa       -> Next.js PWA (port 3001, plain HTTP - same)
 #
 # First-time setup:
-#   1. Copy .env.example to .env and fill in values
-#   2. docker compose up
-#   3. docker compose exec backend npm run db:migrate
-
-version: '3.9'
+#   1. cp .env.example .env   and fill in POSTGRES_PASSWORD and JWT_SECRET (both are REQUIRED)
+#   2. docker compose up -d --build   (the backend applies DB migrations on start)
+#
+# Production overrides:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# NOTE: none of the traffic between the browser/extension and these containers is encrypted by
+# this compose file. Terminate TLS in front of the backend and PWA (Caddy, nginx, a cloud LB, ...)
+# before using it outside localhost; otherwise passwords and JWTs cross the network in clear text.
 
 services:
 
@@ -28,15 +29,16 @@ services:
     environment:
       POSTGRES_DB:       vaulttabs
       POSTGRES_USER:     vaulttabs
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-localdevpassword}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - set it in .env (see .env.example)}
     ports:
-      - "5432:5432"
+      # Loopback only. Remove this mapping entirely if you do not need host access to the DB.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Run init SQL on first startup
       - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: CMD-SHELL pg_isready -U vaulttabs -d vaulttabs
+      test: ["CMD-SHELL", "pg_isready -U vaulttabs -d vaulttabs"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -45,27 +47,31 @@ services:
   # ── Backend (Fastify) ───────────────────────────────────────────────────────
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/dockerfile
     container_name: vaulttabs-backend
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      NODE_ENV:     development
+      NODE_ENV:     production
       PORT:         3000
-      DATABASE_URL: postgres://vaulttabs:${POSTGRES_PASSWORD:-localdevpassword}@postgres:5432/vaulttabs
+      # TLS is expected to be terminated by a reverse proxy in front of the container.
+      HTTPS_ENABLED: "false"
+      # Postgres is on the private compose network, so TLS to it is disabled here.
+      DATABASE_SSL: disable
+      DATABASE_URL: postgres://vaulttabs:${POSTGRES_PASSWORD}@postgres:5432/vaulttabs
       JWT_SECRET:   "${JWT_SECRET:?JWT_SECRET is required - run: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"}"
       JWT_EXPIRY:   ${JWT_EXPIRY:-30d}
+      # Origins allowed by CORS. Add your extension origin (chrome-extension://<id>) if needed.
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3001}
+      # Set to "true" only when running behind a reverse proxy that sets X-Forwarded-For.
+      TRUST_PROXY:  ${TRUST_PROXY:-false}
     ports:
       - "3000:3000"
-    volumes:
-      # Hot reload in dev: mount source, not just the build
-      - ./backend/src:/app/src:ro
     healthcheck:
-      test: CMD-SHELL wget -qO- http://localhost:3000/health || exit 1
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -74,20 +80,23 @@ services:
   # ── PWA (Next.js) ───────────────────────────────────────────────────────────
   pwa:
     build:
-      context: ./pwa
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: pwa/dockerfile
+      args:
+        # NEXT_PUBLIC_* values are baked into the client bundle at BUILD time.
+        # It must be a URL the user's BROWSER can reach (not a container hostname).
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000/api/v1}
     container_name: vaulttabs-pwa
     restart: unless-stopped
     depends_on:
       backend:
         condition: service_healthy
     environment:
-      NODE_ENV:               production
-      NEXT_PUBLIC_API_URL:    ${NEXT_PUBLIC_API_URL:-http://localhost:3000/api/v1}
+      NODE_ENV: production
     ports:
       - "3001:3001"
     healthcheck:
-      test: CMD-SHELL wget -qO- http://localhost:3001 || exit 1
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001 || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -95,18 +104,19 @@ services:
 
   # ── Cleanup job (runs every hour) ──────────────────────────────────────────
   # Expires old restore_requests and enforces snapshot retention limits.
-  # Uses the same backend image — just runs a different command.
+  # Uses the same backend image - just runs a different command.
   cleanup:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/dockerfile
     container_name: vaulttabs-cleanup
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://vaulttabs:${POSTGRES_PASSWORD:-localdevpassword}@postgres:5432/vaulttabs
+      DATABASE_SSL: disable
+      DATABASE_URL: postgres://vaulttabs:${POSTGRES_PASSWORD}@postgres:5432/vaulttabs
     command: ["sh", "-c", "while true; do node dist/db/cleanup.js; sleep 3600; done"]
 
 volumes:

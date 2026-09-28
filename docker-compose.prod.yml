@@ -1,23 +1,22 @@
 # docker-compose.prod.yml
 #
 # Production overrides. Use with:
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 #
-# Changes from dev:
-#   - No source volume mounts (use built image only)
-#   - Stricter resource limits
-#   - No postgres port exposed externally (only internal network)
-#   - Restart always (not unless-stopped)
-
-version: '3.9'
+# Changes from the base file:
+#   - Postgres is NOT published on the host at all (reachable only inside the compose network)
+#   - Restart always
+#   - Resource limits
+#
+# Requires Docker Compose v2.24+ (uses the !reset YAML tag to clear the inherited port mapping;
+# a plain `ports: []` override does NOT remove ports inherited from the base file).
+# Put a TLS-terminating reverse proxy in front of backend (3000) and pwa (3001).
 
 services:
 
   postgres:
     restart: always
-    ports: []  # Remove external port — only accessible within Docker network
-    environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in production}
+    ports: !reset []
     deploy:
       resources:
         limits:
@@ -28,7 +27,6 @@ services:
     restart: always
     environment:
       NODE_ENV: production
-    volumes: []  # No source mount in production
     deploy:
       resources:
         limits:

@@ -217,7 +217,7 @@ export default function RecoverPage() {
           <div className={styles.title}>Recovering account</div>
           <div className={styles.phaseLabel}>{phaseLabel}</div>
           <div className={styles.zkNote}>
-            All decryption happens in your browser. The server never sees your key.
+            Your recovery code is used in your browser to unwrap the master key. Note that the new password you choose is sent to the server.
           </div>
         </div>
       </div>

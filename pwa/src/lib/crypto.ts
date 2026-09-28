@@ -15,7 +15,9 @@
  * 4. We generate a random 256-bit AES master key (this encrypts your tabs)
  * 5. We encrypt the master key using the wrapping key (AES-GCM)
  * 6. We upload to the server: encrypted_master_key + master_key_iv + salt
- *    The server stores this encrypted blob. It can't read it.
+ *    The server stores this wrapped key. NOTE: the account password is ALSO sent to the server
+ *    (for login authentication) and it is the input to the wrapping key, so a server that
+ *    logs/keeps the password could unwrap the master key. This is not zero-knowledge.
  * 7. We store the DECRYPTED master key in memory (for tab encryption)
  *
  * LOGIN (subsequent sessions):
@@ -26,10 +28,10 @@
  *
  * TAB ENCRYPTION:
  * 1. Collect all open tabs → JSON string
- * 2. Generate a fresh random IV (16 bytes)
+ * 2. Generate a fresh random IV (12 bytes)
  * 3. Encrypt with master key (AES-256-GCM)
  * 4. Upload: iv + encrypted_blob
- * 5. Server stores it without being able to read it
+ * 5. Server stores the ciphertext (it cannot read it without the master key)
  *
  * WebCrypto API is built into every modern browser.
  * No libraries needed — this is native browser code.
@@ -154,9 +156,9 @@ export function generateSalt(): string {
  * This key is the crown jewel — it decrypts your tab data.
  *
  * The key is:
- * - Generated client-side (server never sees it)
- * - Stored client-side encrypted in IndexedDB
- * - Only the encrypted version goes to the server
+ * - Generated client-side (the raw key is never sent to the server)
+ * - Stored client-side as a non-extractable CryptoKey in IndexedDB (not password-encrypted)
+ * - Only the password-wrapped (and recovery-wrapped) versions go to the server
  */
 export async function generateMasterKey(): Promise<CryptoKey> {
   return crypto.subtle.generateKey(
@@ -247,7 +249,7 @@ export async function decryptMasterKey(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB ENCRYPTION: Encrypt a tab snapshot
-// Called every 15 seconds to encrypt the current tab state
+// Called (debounced ~3s after tab changes, plus a 3-minute fallback) to encrypt the current tab state
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -446,8 +448,9 @@ export async function decryptMasterKeyWithRecoveryCode(
 
 /**
  * Hashes the recovery code using SHA-256.
- * We send THIS hash to the server instead of the plaintext code to maintain Zero-Knowledge.
- * The server then hashes this hash using scrypt to store it securely.
+ * We send THIS hash to the server instead of the plaintext code so the server never receives the
+ * code itself; it stores a scrypt hash of this hash as a verifier for the recovery endpoint.
+ * (The code is high-entropy, so the hash does not help an attacker recover it.)
  */
 export async function hashRecoveryCode(recoveryCode: string): Promise<string> {
   const codeBytes = new TextEncoder().encode(recoveryCode.replace(/-/g, '').toUpperCase());

@@ -14,9 +14,17 @@
  *    Sandboxed to the extension — web pages cannot access it.
  *
  * SECURITY NOTE ON MASTER KEY IN INDEXEDDB:
- * The master key is marked non-extractable, so its raw bytes can never be
- * read out of the CryptoKey object even by our own code. IndexedDB stores
- * the opaque handle. This is the same pattern used by password managers.
+ * The master key is marked non-extractable, so its raw bytes cannot be read
+ * back out of the CryptoKey object by script. IndexedDB stores the opaque handle.
+ * This limits key EXFILTRATION only: it is not encrypted under a password while
+ * stored, and any code running inside the extension (or someone with access to
+ * the unlocked browser profile) can still USE it to decrypt snapshots.
+ * The JWT in chrome.storage.local is likewise stored unencrypted.
+ *
+ * PRIVACY NOTE ON chrome.storage.sync:
+ * device_id and device_name are mirrored to chrome.storage.sync so a reinstall
+ * can re-identify the device. That data is synced by the browser vendor
+ * (Google / Mozilla). No keys, tokens or tab data are written there.
  */
 
 import { openDB, DBSchema, IDBPDatabase } from 'idb';

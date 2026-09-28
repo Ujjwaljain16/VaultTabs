@@ -41,6 +41,16 @@ function el<T extends HTMLElement>(id: string): T {
   return e;
 }
 
+/** Escape text before interpolating it into an innerHTML template. */
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function showScreen(id: string) {
   document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
   el(id).classList.remove('hidden');
@@ -673,7 +683,7 @@ async function showDevicePicker(url: string) {
 
   const result = await apiGetDevices();
   if (!result.ok || !result.data) {
-    listEl.innerHTML = `<div class="error-msg">${result.error || 'Failed to load devices'}</div>`;
+    listEl.innerHTML = `<div class="error-msg">${escapeHtml(result.error || 'Failed to load devices')}</div>`;
     return;
   }
 
@@ -696,10 +706,13 @@ async function showDevicePicker(url: string) {
   userDevices.forEach(device => {
     const btn = document.createElement('button');
     btn.className = 'picker-item';
-    btn.innerHTML = `
-      <span class="picker-icon">◉</span>
-      <div class="picker-name">${device.device_name}</div>
-    `;
+    const icon = document.createElement('span');
+    icon.className = 'picker-icon';
+    icon.textContent = '◉';
+    const name = document.createElement('div');
+    name.className = 'picker-name';
+    name.textContent = device.device_name; // textContent: device names are user/server supplied
+    btn.append(icon, name);
     btn.onclick = () => handleSendToDevice(device.id, url);
     listEl.appendChild(btn);
   });
@@ -792,7 +805,7 @@ function renderRestoreOverlay(phase: 'sending' | 'waiting' | 'success' | 'error'
       <div class="restore-spinner"></div>
       <div class="restore-title">Waiting for desktop</div>
       <div class="restore-desc">
-        The extension on <strong>${data.deviceName}</strong> will open your tab shortly.
+        The extension on <strong>${escapeHtml(data.deviceName)}</strong> will open your tab shortly.
       </div>
       <div class="restore-pulse">
         <div class="restore-dot"></div>
@@ -811,14 +824,14 @@ function renderRestoreOverlay(phase: 'sending' | 'waiting' | 'success' | 'error'
       <div class="restore-success-icon">✓</div>
       <div class="restore-title">Tab restored!</div>
       <div class="restore-desc">
-        Your tab is now open on <strong>${data.deviceName}</strong>.
+        Your tab is now open on <strong>${escapeHtml(data.deviceName)}</strong>.
       </div>
     `;
   } else if (phase === 'error') {
     content.innerHTML = `
       <div class="restore-error-icon">✕</div>
       <div class="restore-title">Restore failed</div>
-      <div class="restore-desc">${data.message}</div>
+      <div class="restore-desc">${escapeHtml(data.message)}</div>
       <button class="restore-cancel-btn" id="btn-dismiss-restore">Dismiss</button>
     `;
     const dismissBtn = el('btn-dismiss-restore');

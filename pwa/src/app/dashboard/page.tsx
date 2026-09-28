@@ -9,6 +9,11 @@ import type { DeviceSnapshot } from '@/types';
 import type { TabSnapshot } from '@vaulttabs/shared';
 import styles from './dashboard.module.css';
 
+/** Only ever open http(s) URLs from decrypted snapshots (never javascript:, data:, file: ...). */
+function openSafeUrl(url: string) {
+  if (/^https?:\/\//i.test(url)) window.open(url, '_blank', 'noopener,noreferrer');
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type RestoreState =
@@ -176,7 +181,7 @@ export default function DashboardPage() {
   }
 
   function openTab(url: string) {
-    window.open(url, '_blank', 'noopener,noreferrer');
+    openSafeUrl(url);
   }
 
   function formatRelativeTime(iso: string | Date): string {
@@ -520,7 +525,7 @@ function DeviceCard({ device, allDevices, expanded, onToggle, onOpenTab, onResto
               className={styles.openAllBtn}
               onClick={(e) => {
                 e.stopPropagation();
-                device.tabs.forEach((tab, i) => setTimeout(() => window.open(tab.url, '_blank', 'noopener,noreferrer'), i * 100));
+                device.tabs.forEach((tab, i) => setTimeout(() => openSafeUrl(tab.url), i * 100));
               }}
             >
               ↗ OPEN HERE

@@ -6,7 +6,9 @@
  * THREE LAYERS:
  *
  * 1. IndexedDB (via idb)
- *    - Stores the CryptoKey master key object
+ *    - Stores the master key as a NON-EXTRACTABLE CryptoKey handle. Script cannot read the raw
+ *      key bytes, but any script running on this origin (e.g. via XSS) can still USE the key
+ *      to decrypt data. The key is not encrypted under a password while stored.
  *    - Persists across page reloads (user doesn't re-enter password every time)
  *    - Cleared on logout
  *
@@ -16,9 +18,9 @@
  *    - User remains logged in until explicit logout
  *
  * WHY localStorage FOR JWT?
- * Consistent with modern PWA expectations.
- * Token is protected by OS-level disk encryption in most modern devices.
- * Tradeoff vs security (localStorage) — optimized for "always-on" vault access.
+ * Convenience for "always-on" vault access. Tradeoff: any XSS on this origin can read the
+ * token (and use the stored master key). The token is not protected beyond what the browser
+ * profile / OS disk encryption provide.
  */
 
 import { openDB, DBSchema, IDBPDatabase } from 'idb';

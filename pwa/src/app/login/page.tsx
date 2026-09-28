@@ -95,7 +95,7 @@ export default function LoginPage() {
       }
 
       addLog('> master key decrypted');
-      addLog('> server never saw your password or key');
+      addLog('> master key unwrapped locally');
       addLog('> loading dashboard...');
 
       // ── Step 4: Persist & redirect ────────────────────────────────────────
@@ -139,7 +139,7 @@ export default function LoginPage() {
           </svg>
           <div>
             <div className={styles.logoName}>VaultTabs</div>
-            <div className={styles.logoSub}>zero-knowledge tab sync</div>
+            <div className={styles.logoSub}>client-side encrypted tab sync</div>
           </div>
         </div>
 
@@ -212,8 +212,8 @@ export default function LoginPage() {
         <div className={styles.zkNote}>
           <span className={styles.zkIcon}>◈</span>
           <span>
-            Your password never leaves this device.
-            All decryption happens locally in your browser.
+            Your password is sent to the server over HTTPS to sign you in (and hashed there).
+            Tab decryption happens locally in your browser.
           </span>
         </div>
       </div>
