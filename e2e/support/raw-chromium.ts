@@ -35,11 +35,18 @@ export class RawChromium {
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-search-engine-choice-screen',
-        ...(HEADED ? [] : ['--headless']),
+        ...(HEADED ? [] : ['--headless=new']),
+        // Linux CI runners (Ubuntu 24 AppArmor) block the setuid/user-namespace sandbox; Playwright
+        // passes these itself, but this process is launched without Playwright.
+        ...(process.platform === 'linux' ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
         'about:blank',
       ],
-      { stdio: 'ignore', windowsHide: true },
+      { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true },
     );
+    let stderr = '';
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString()).slice(-4000);
+    });
     const raw = new RawChromium(proc, port);
     const deadline = Date.now() + 30_000;
     for (;;) {
@@ -47,7 +54,11 @@ export class RawChromium {
         await raw.targets();
         return raw;
       } catch {
-        if (Date.now() > deadline) throw new Error('raw chromium did not start');
+        if (Date.now() > deadline || proc.exitCode !== null) {
+          proc.kill();
+          throw new Error(`raw chromium did not start (exit ${proc.exitCode}):
+${stderr}`);
+        }
         await new Promise(r => setTimeout(r, 250));
       }
     }
