@@ -29,9 +29,28 @@ export const KDF_DOWNGRADE_MESSAGE =
 
 const DECRYPT_FAILED = 'Could not unlock your vault with this password.';
 
+/** A device of the same name not seen for this long is treated as this browser (reinstall). */
+const ADOPT_IDLE_MS = 10 * 60 * 1000;
+const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
 async function attachDevice(token: string, userId: string, deviceName?: string) {
-  const existing = await getDeviceId(userId);
   const name = (deviceName?.trim() || defaultDeviceName()).slice(0, LIMITS.maxDeviceNameChars);
+  let existing = await getDeviceId(userId);
+  if (!existing) {
+    // Fresh install / new extension id: no stored device for this account. Re-attach to the
+    // user's existing device with the same name (e.g. "Brave personal") instead of creating a
+    // duplicate, unless that device is active right now (then it's a different browser).
+    try {
+      const { devices } = await api.devices(token);
+      const match = devices
+        .filter(d => sameName(d.device_name, name))
+        .filter(d => Date.now() - new Date(d.last_seen).getTime() > ADOPT_IDLE_MS)
+        .sort((a, b) => new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime())[0];
+      existing = match?.id;
+    } catch {
+      // Fall back to registering a new device.
+    }
+  }
   // The server reuses `id` only if it already belongs to this user; otherwise it issues a new one.
   const { device } = await api.registerDevice(
     { device_name: name, ...(existing ? { id: existing } : {}) },

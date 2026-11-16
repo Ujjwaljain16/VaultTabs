@@ -145,7 +145,7 @@ export const api = {
   // Devices
   registerDevice: (payload: RegisterDevicePayload, token?: string) =>
     request<DeviceResponse>('/devices/register', { method: 'POST', body: payload, auth: token ?? true }),
-  devices: () => request<DevicesResponse>('/devices'),
+  devices: (token?: string) => request<DevicesResponse>('/devices', { auth: token ?? true }),
   heartbeat: (deviceId: string) =>
     request<unknown>(`/devices/${enc(deviceId)}/heartbeat`, { method: 'PATCH', body: {} }),
   renameDevice: (deviceId: string, deviceName: string) =>
