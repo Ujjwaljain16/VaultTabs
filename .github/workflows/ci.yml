@@ -114,6 +114,7 @@ jobs:
           name: extension-${{ github.sha }}
           path: extension/.output/*.zip
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 7
 
   docker:
