@@ -44,7 +44,12 @@ async function attachDevice(token: string, userId: string, deviceName?: string) 
       const { devices } = await api.devices(token);
       const match = devices
         .filter(d => sameName(d.device_name, name))
-        .filter(d => Date.now() - new Date(d.last_seen).getTime() > ADOPT_IDLE_MS)
+        // A name the user chose ("Personal Chrome") identifies the browser, so reuse it even if the
+        // old install was active moments ago. Auto-generated names ("Chrome on Windows") can be
+        // shared by different machines, so for those only reuse a device that has gone idle.
+        .filter(
+          d => name !== defaultDeviceName() || Date.now() - new Date(d.last_seen).getTime() > ADOPT_IDLE_MS,
+        )
         .sort((a, b) => new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime())[0];
       existing = match?.id;
     } catch {
