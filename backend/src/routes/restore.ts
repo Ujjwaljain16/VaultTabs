@@ -75,6 +75,7 @@ export async function restoreRoutes(
         body.target_device_id.toLowerCase(),
         content,
       );
+      restoreNotifier.publish(result.request_id, body.target_device_id.toLowerCase());
       return reply.status(201).send(result);
     },
   );

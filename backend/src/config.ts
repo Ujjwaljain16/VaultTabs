@@ -34,6 +34,16 @@ export interface Config extends DatabaseConfig {
   cleanupIntervalMinutes: number;
   /** Key for the deterministic fake prelogin/recovery data returned for unknown emails. */
   preloginSecret: Buffer;
+  /**
+   * Where the cross-instance restore listener (LISTEN) connects:
+   *  - 'main': the regular pool (DATABASE_URL is a direct connection)
+   *  - 'off':  no LISTEN; a request reaches the SSE clients of the instance that created it only.
+   *            Chosen when DATABASE_URL is a transaction pooler (Neon "-pooler", PgBouncer), where
+   *            LISTEN cannot work, and no DATABASE_LISTEN_URL is set. Fine for a single instance,
+   *            and it lets serverless Postgres (Neon) suspend when idle.
+   *  - { url }: a dedicated direct connection (DATABASE_LISTEN_URL), for multiple instances.
+   */
+  restoreListen: 'main' | 'off' | { url: string };
 }
 
 export class ConfigError extends Error {
@@ -110,6 +120,10 @@ const fullSchema = databaseSchema
       .min(0)
       .max(7 * 24 * 60)
       .default(60),
+    DATABASE_LISTEN_URL: z
+      .string()
+      .regex(/^postgres(ql)?:\/\//, 'DATABASE_LISTEN_URL must be a postgres:// or postgresql:// URL')
+      .optional(),
     PRELOGIN_SECRET: z.string().min(32, 'PRELOGIN_SECRET must be at least 32 characters').optional(),
   })
   .refine(e => Boolean(e.TLS_CERT_FILE) === Boolean(e.TLS_KEY_FILE), {
@@ -169,5 +183,20 @@ export function loadConfig(env: Env = process.env): Config {
     maxDevicesPerUser: e.MAX_DEVICES_PER_USER,
     cleanupIntervalMinutes: e.CLEANUP_INTERVAL_MINUTES,
     preloginSecret,
+    restoreListen: e.DATABASE_LISTEN_URL
+      ? { url: e.DATABASE_LISTEN_URL }
+      : isTransactionPooler(e.DATABASE_URL)
+        ? 'off'
+        : 'main',
   };
+}
+
+/** Neon pooled endpoints and PgBouncer-style poolers cannot hold a LISTEN session. */
+export function isTransactionPooler(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return /-pooler\./i.test(u.hostname) || u.searchParams.get('pgbouncer') === 'true' || u.port === '6432';
+  } catch {
+    return false;
+  }
 }

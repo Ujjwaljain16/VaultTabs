@@ -32,7 +32,7 @@ export function createContainer(deps: { config: Config; sql: Sql; signToken: Sig
     snapshotService: new SnapshotService(snapshotRepository, deviceService, LIMITS.maxSavedSessions),
     restoreService: new RestoreService(restoreRepository, snapshotRepository, deviceService),
     accountService: new AccountService(userRepository, deviceRepository, snapshotRepository),
-    restoreNotifier: new RestoreNotifier(sql, log),
+    restoreNotifier: new RestoreNotifier(sql, log, config),
   };
 }
 

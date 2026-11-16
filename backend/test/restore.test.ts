@@ -294,8 +294,44 @@ describe('restore SSE stream', () => {
         target_device_id: target,
         snapshot: { id: snapshotId },
       });
+      // Local publish + LISTEN both fire for this instance: it must be delivered exactly once.
+      await expect(events.next(1500)).rejects.toThrow('SSE timeout');
     } finally {
       abort.abort();
+    }
+  });
+
+  it('delivers in real time without LISTEN when the database is behind a transaction pooler', async () => {
+    const server = await buildServer({ ...testConfig(), restoreListen: 'off' });
+    await server.listen({ host: '127.0.0.1', port: 0 });
+    const url = `http://127.0.0.1:${(server.server.address() as AddressInfo).port}/api/v1`;
+    const abort = new AbortController();
+    try {
+      const user = await registerUser(server);
+      const target = await registerDevice(server, user.token, 'target');
+      const res = await fetch(`${url}/restore/stream?device_id=${target}`, {
+        headers: { authorization: `Bearer ${user.token}` },
+        signal: abort.signal,
+      });
+      const events = sseReader(res.body!);
+      expect((await events.next()).data).toEqual({ pending: false });
+
+      const payload = await encryptRestorePayload({ urls: ['https://example.org/'] }, user.masterKey, {
+        userId: user.userId,
+        targetDeviceId: target,
+      });
+      const created = (
+        await api(server, 'POST', '/restore', {
+          token: user.token,
+          body: { target_device_id: target, ...payload },
+        })
+      ).json<CreateRestoreResponse>();
+      const event = (await events.next()).data as PendingRestoreResponse;
+      expect(event.request?.id).toBe(created.request_id);
+      await expect(events.next(1500)).rejects.toThrow('SSE timeout');
+    } finally {
+      abort.abort();
+      await server.close();
     }
   });
 
