@@ -1396,3 +1396,20 @@ input[type='search'] {
   color: var(--error);
   background: var(--error-dim);
 }
+
+.btn-chip-primary {
+  border-color: var(--green-border);
+  color: var(--green);
+}
+.device-head-row .btn-chip {
+  padding: 3px 6px;
+}
+.tab-item .btn-chip {
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.tab-item:hover .btn-chip,
+.tab-item .btn-chip:focus-visible {
+  opacity: 1;
+}

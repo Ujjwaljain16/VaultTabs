@@ -617,7 +617,7 @@ function stopPolling(): void {
   pollTimer = undefined;
 }
 
-async function sendToDevice(device: Device, urls: string[]): Promise<void> {
+async function sendToDevice(device: Pick<Device, 'id' | 'device_name'>, urls: string[]): Promise<void> {
   closeDevicePicker();
   if (!session) return;
   renderSendStatus({ phase: 'sending' });
@@ -837,11 +837,27 @@ function renderDeviceCard(device: RemoteDevice, tabs: TabSnapshot[], searching: 
     h('span', { className: 'device-caret', text: '▶' }),
     h('div', { className: 'device-meta' }, h('div', { className: 'device-name', text: device.name }), sub),
   );
+  const target = { id: device.deviceId, device_name: device.name };
+  // Open on THAT browser (e.g. Brave personal): sent end-to-end encrypted, opens in its window.
+  const openThere = h('button', {
+    className: 'btn-chip btn-chip-primary',
+    text: 'Open there',
+    type: 'button',
+    title: `Open these tabs in ${device.name}`,
+  });
+  openThere.disabled = total === 0;
+  openThere.addEventListener('click', () => {
+    void sendToDevice(
+      target,
+      (device.tabs ?? []).map(t => t.url),
+    );
+  });
+  // Open in THIS browser.
   const openAll = h('button', {
     className: 'btn-chip',
-    text: 'Open all',
+    text: 'Here',
     type: 'button',
-    title: 'Open these tabs in a new window',
+    title: 'Open these tabs here, in a new window of this browser',
   });
   openAll.disabled = total === 0;
   openAll.addEventListener('click', async () => {
@@ -884,7 +900,7 @@ function renderDeviceCard(device: RemoteDevice, tabs: TabSnapshot[], searching: 
   const card = h(
     'div',
     { className: `device-card${isOpen ? ' open' : ''}` },
-    h('div', { className: 'device-head-row' }, head, openAll, remove),
+    h('div', { className: 'device-head-row' }, head, openThere, openAll, remove),
   );
   head.addEventListener('click', () => {
     if (expanded.has(device.deviceId)) expanded.delete(device.deviceId);
@@ -908,8 +924,22 @@ function renderDeviceCard(device: RemoteDevice, tabs: TabSnapshot[], searching: 
         ),
         tab.pinned && h('span', { className: 'pin-badge', text: 'PIN' }),
       );
-      item.addEventListener('click', () => {
+      item.title = `Open in ${device.name}
+${tab.url}`;
+      // Clicking a tab opens it in the browser it belongs to; "Here" opens it in this one.
+      const here = h('button', {
+        className: 'btn-chip',
+        text: 'Here',
+        type: 'button',
+        title: 'Open in this browser instead',
+      });
+      here.addEventListener('click', e => {
+        e.stopPropagation();
         if (isSafeTabUrl(tab.url)) void browser.tabs.create({ url: tab.url });
+      });
+      item.append(here);
+      item.addEventListener('click', () => {
+        if (isSafeTabUrl(tab.url)) void sendToDevice(target, [tab.url]);
       });
       list.append(item);
     }
