@@ -84,6 +84,8 @@ const icons = { 16: 'icon-16.png', 32: 'icon-32.png', 48: 'icon-48.png', 128: 'i
 export default defineConfig({
   // Explicit imports only (no auto-imported globals).
   imports: false,
+  // The end-to-end tests build into their own folder so they never overwrite a regular build.
+  ...(process.env.WXT_OUT_DIR?.trim() ? { outDir: process.env.WXT_OUT_DIR.trim() } : {}),
   manifest: (env): UserManifest => {
     const isDev = env.mode === 'development';
     const apiOrigin = resolveApiOrigin(env);

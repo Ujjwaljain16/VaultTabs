@@ -34,8 +34,19 @@ const ADOPT_IDLE_MS = 10 * 60 * 1000;
 const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 async function attachDevice(token: string, userId: string, deviceName?: string) {
-  const name = (deviceName?.trim() || defaultDeviceName()).slice(0, LIMITS.maxDeviceNameChars);
+  let name = (deviceName?.trim() || defaultDeviceName()).slice(0, LIMITS.maxDeviceNameChars);
   let existing = await getDeviceId(userId);
+  if (existing && name === defaultDeviceName()) {
+    // Logging in again with the untouched, pre-filled default name must not rename the device
+    // the user already named ("Brave personal" → "Chrome on Windows"): keep its current name.
+    try {
+      const { devices } = await api.devices(token);
+      const current = devices.find(d => d.id === existing);
+      if (current) name = current.device_name;
+    } catch {
+      // Keep the default name; the device id is still reused.
+    }
+  }
   if (!existing) {
     // Fresh install / new extension id: no stored device for this account. Re-attach to the
     // user's existing device with the same name (e.g. "Brave personal") instead of creating a

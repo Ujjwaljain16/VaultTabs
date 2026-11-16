@@ -1,6 +1,6 @@
 {
   "name": "vaulttabs-extension",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "description": "VaultTabs browser extension - end-to-end encrypted tab sync",
   "license": "MIT",

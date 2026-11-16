@@ -86,6 +86,55 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  e2e:
+    name: End-to-end (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # The suite builds the backend, PWA and extension itself against its local URLs
+      # (http://127.0.0.1:3010/api/v1); these override the dummy URLs above.
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:3010/api/v1
+      VITE_API_URL: http://127.0.0.1:3010/api/v1
+      VITE_DASHBOARD_URL: http://localhost:3011
+      E2E_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm install -g npm@${{ env.NPM_VERSION }}
+      - run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run the suite (headless)
+        run: npm run test:e2e
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.sha }}
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+            e2e/.state/*.log
+          include-hidden-files: true
+          retention-days: 7
+
   build:
     name: Build
     runs-on: ubuntu-latest

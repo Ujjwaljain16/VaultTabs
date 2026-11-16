@@ -52,7 +52,7 @@ export async function restoreRoutes(
   fastify: FastifyInstance,
   { container, authenticate, isOriginAllowed }: RouteDeps,
 ) {
-  const { restoreService, deviceService, restoreNotifier } = container;
+  const { restoreService, deviceService, restoreNotifier, userRepository: users } = container;
 
   const streamsPerUser = new Map<string, number>();
   const openStreams = new Set<() => void>();
@@ -89,7 +89,7 @@ export async function restoreRoutes(
     '/restore/stream',
     { preHandler: authenticate, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
     async (request, reply) => {
-      const { userId } = request.user;
+      const { userId, tokenVersion } = request.user;
       const deviceId = parseOrThrow(DeviceQuery, request.query).device_id.toLowerCase();
       await deviceService.assertOwned(userId, deviceId);
 
@@ -122,15 +122,31 @@ export async function restoreRoutes(
         if (!closed) res.write(`data: ${JSON.stringify(event)}\n\n`);
       };
 
+      // The token was checked when the stream opened. A revocation since then ("sign out
+      // everywhere", password change, recovery, account deletion) must end the stream too, or a
+      // signed-out browser would keep receiving (and opening) tabs. The client then reconnects,
+      // gets 401 token_invalid and ends its session.
+      const stillAuthorized = async () => {
+        const state = await users.findTokenState(userId);
+        if (state?.token_version === tokenVersion) return true;
+        close();
+        return false;
+      };
+
       const ping = setInterval(() => {
-        if (!closed) res.write(': ping\n\n');
+        if (closed) return;
+        stillAuthorized()
+          .then(ok => {
+            if (ok && !closed) res.write(': ping\n\n');
+          })
+          .catch((err: unknown) => request.log.warn({ err }, 'restore stream: token check failed'));
       }, PING_INTERVAL_MS);
 
       const unsubscribe = restoreNotifier.subscribe(deviceId, requestId => {
-        restoreService
-          .pendingUnchecked(userId, deviceId)
+        stillAuthorized()
+          .then(ok => (ok ? restoreService.pendingUnchecked(userId, deviceId) : null))
           .then(state => {
-            if (state.pending && state.request?.id === requestId) send(state);
+            if (state?.pending && state.request?.id === requestId) send(state);
           })
           .catch((err: unknown) => request.log.warn({ err }, 'restore stream: failed to load request'));
       });

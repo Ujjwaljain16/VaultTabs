@@ -25,6 +25,9 @@ export default defineConfig(
       '**/next-env.d.ts',
       'pwa/public/**',
       'extension/public/**',
+      'e2e/.state/**',
+      'e2e/playwright-report/**',
+      'e2e/test-results/**',
     ],
   },
 
@@ -60,7 +63,12 @@ export default defineConfig(
 
   // ── Node: backend, shared, root tooling ────────────────────────────────────────────────────
   {
-    files: ['backend/**/*.{ts,js,mjs,cjs}', 'shared/**/*.{ts,js,mjs}', '*.{js,mjs,cjs,mts,ts}'],
+    files: [
+      'backend/**/*.{ts,js,mjs,cjs}',
+      'shared/**/*.{ts,js,mjs}',
+      'e2e/**/*.ts',
+      '*.{js,mjs,cjs,mts,ts}',
+    ],
     languageOptions: { globals: { ...globals.node } },
   },
   // shared/ also runs in browsers and service workers (WebCrypto, atob/btoa).

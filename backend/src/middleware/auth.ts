@@ -13,6 +13,8 @@ import type { TokenClaims } from '../services/auth.service.js';
 export interface AuthUser {
   userId: string;
   email: string;
+  /** token_version the token was issued for (long-lived streams re-check it). */
+  tokenVersion: number;
 }
 
 declare module '@fastify/jwt' {
@@ -48,6 +50,6 @@ export function createAuthenticate(users: UserRepository): preHandlerAsyncHookHa
     const state = await users.findTokenState(claims.sub);
     if (!state || state.token_version !== claims.tv) throw tokenInvalid();
 
-    request.user = { userId: claims.sub, email: state.email };
+    request.user = { userId: claims.sub, email: state.email, tokenVersion: claims.tv };
   };
 }

@@ -236,9 +236,13 @@ export async function logout(): Promise<void> {
 export async function endSession(token: string, message: string): Promise<boolean> {
   const state = await loadState();
   if (!state.token || state.token !== token) return false;
-  await browser.storage.local.remove(SESSION_KEYS);
-  await clearMasterKey();
+  // Order matters: an open popup re-routes as soon as the token disappears and must by then find
+  // the message and the email for the re-login screen, and no popup may ever read a half-removed
+  // session (it would show a blank login form). So: message first, then every session key in ONE
+  // removal, then the key.
   await patchState({ last_error: message, relogin_email: state.user_email });
+  await browser.storage.local.remove(SESSION_KEYS.filter(k => k !== 'last_error'));
+  await clearMasterKey();
   return true;
 }
 

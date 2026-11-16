@@ -15,17 +15,19 @@
   "scripts": {
     "build:shared": "npm run build --workspace=shared",
     "build": "npm run build:shared && npm run build --workspace=backend && npm run build --workspace=pwa && npm run build --workspace=extension",
-    "typecheck": "npm run build:shared && npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run build:shared && npm run typecheck --workspaces --if-present && tsc -p e2e",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "npm run build:shared && vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test -c e2e/playwright.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",
     "@next/eslint-plugin-next": "^16.4.6",
+    "@playwright/test": "^1.65.1",
     "eslint": "^9.39.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^16.5.0",

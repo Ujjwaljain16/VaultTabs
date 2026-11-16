@@ -13,6 +13,11 @@ coverage/
 *.tsbuildinfo
 next-env.d.ts
 
+# End-to-end test output
+e2e/.state/
+e2e/playwright-report/
+e2e/test-results/
+
 # Static/binary assets and generated files
 pwa/public/
 extension/public/
