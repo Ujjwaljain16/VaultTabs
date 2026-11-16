@@ -59,6 +59,10 @@ describe('restore requests', () => {
       request_id: expect.any(String),
       expires_at: expect.any(String),
     });
+    // Queued for ~24 h so a closed browser still gets it when it next starts.
+    const ttlHours = (new Date(firstReq.expires_at).getTime() - Date.now()) / 3_600_000;
+    expect(ttlHours).toBeGreaterThan(23.9);
+    expect(ttlHours).toBeLessThanOrEqual(24);
 
     let pending = (
       await api(ctx.server, 'GET', `/restore/pending?device_id=${target}`, { token: user.token })
@@ -72,7 +76,7 @@ describe('restore requests', () => {
       snapshot: { id: snapshotId, device_id: source, enc_version: 2 },
     });
 
-    // A new request for the same target expires the previous one.
+    // A second request for the same target is queued behind the first (both stay pending).
     const payload = await encryptRestorePayload(
       { urls: ['https://a.test/', 'javascript:alert(1)'] },
       user.masterKey,
@@ -90,19 +94,23 @@ describe('restore requests', () => {
     const firstStatus = (
       await api(ctx.server, 'GET', `/restore/${firstReq.request_id}`, { token: user.token })
     ).json<RestoreStatusResponse>();
-    expect(firstStatus.request.status).toBe('expired');
+    expect(firstStatus.request.status).toBe('pending');
 
     pending = (
       await api(ctx.server, 'GET', `/restore/pending?device_id=${target}`, { token: user.token })
     ).json<PendingRestoreResponse>();
-    expect(pending.request).toMatchObject({
+    // Oldest first; `request` stays the oldest for older clients.
+    expect(pending.request?.id).toBe(firstReq.request_id);
+    expect(pending.requests?.map(r => r.id)).toEqual([firstReq.request_id, secondReq.request_id]);
+    const queued = pending.requests![1]!;
+    expect(queued).toMatchObject({
       id: secondReq.request_id,
       snapshot: null,
       payload_iv: payload.payload_iv,
     });
     const decrypted = await decryptRestorePayload(
-      pending.request!.encrypted_payload!,
-      pending.request!.payload_iv!,
+      queued.encrypted_payload!,
+      queued.payload_iv!,
       user.masterKey,
       {
         userId: user.userId,
@@ -134,9 +142,43 @@ describe('restore requests', () => {
       body: { status: 'completed' },
     });
     expect(again.statusCode).toBe(409);
+    // The first request is still queued until its device opens it.
+    pending = (
+      await api(ctx.server, 'GET', `/restore/pending?device_id=${target}`, { token: user.token })
+    ).json<PendingRestoreResponse>();
+    expect(pending.requests?.map(r => r.id)).toEqual([firstReq.request_id]);
+    await api(ctx.server, 'PATCH', `/restore/${firstReq.request_id}`, {
+      token: user.token,
+      body: { status: 'completed' },
+    });
     expect(
       (await api(ctx.server, 'GET', `/restore/pending?device_id=${target}`, { token: user.token })).json(),
     ).toEqual({ pending: false });
+  });
+
+  it('keeps at most 50 queued requests per device, expiring the oldest', async () => {
+    const user = await registerUser(ctx.server);
+    const target = await registerDevice(ctx.server, user.token, 'target');
+    const payload = await encryptRestorePayload({ urls: ['https://q.test/'] }, user.masterKey, {
+      userId: user.userId,
+      targetDeviceId: target,
+    });
+    const ids: string[] = [];
+    for (let i = 0; i < 52; i++) {
+      const res = await api(ctx.server, 'POST', '/restore', {
+        token: user.token,
+        body: { target_device_id: target, ...payload },
+      });
+      ids.push(res.json<CreateRestoreResponse>().request_id);
+    }
+    const pending = (
+      await api(ctx.server, 'GET', `/restore/pending?device_id=${target}`, { token: user.token })
+    ).json<PendingRestoreResponse>();
+    expect(pending.requests?.map(r => r.id)).toEqual(ids.slice(2));
+    const oldest = (
+      await api(ctx.server, 'GET', `/restore/${ids[0]}`, { token: user.token })
+    ).json<RestoreStatusResponse>();
+    expect(oldest.request.status).toBe('expired');
   });
 
   it('validates the request content', async () => {

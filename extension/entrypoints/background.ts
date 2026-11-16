@@ -247,7 +247,7 @@ export default defineBackground({
               } catch {
                 return;
               }
-              if (parsed.pending && parsed.request) void handleRestore(parsed.request);
+              void handleQueue(parsed);
             },
             onComment: () => {
               if (!reset) {
@@ -274,13 +274,23 @@ export default defineBackground({
     async function pollPending(session: ActiveSession): Promise<void> {
       try {
         const res = await api.pendingRestore(session.deviceId);
-        if (res.pending && res.request) await handleRestore(res.request);
+        await handleQueue(res);
       } catch {
         // The stream / next alarm will retry.
       }
     }
 
     // ─── Restore handling ───────────────────────────────────────────────────────────────────────
+
+    /**
+     * Open every queued request, oldest first. Tabs sent while this browser was closed wait on the
+     * server (up to 24 h) and arrive here on the first connect after startup.
+     */
+    async function handleQueue(res: PendingRestoreResponse): Promise<void> {
+      if (!res.pending) return;
+      const queue = res.requests?.length ? res.requests : res.request ? [res.request] : [];
+      for (const request of queue) await handleRestore(request);
+    }
 
     async function handleRestore(request: PendingRestoreDetail): Promise<void> {
       if (handledRequests.has(request.id)) return;

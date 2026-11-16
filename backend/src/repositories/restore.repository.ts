@@ -3,7 +3,13 @@ import type { Sql } from '../db/client.js';
 
 /** Postgres NOTIFY channel; payload is `{ "id": <request id>, "d": <target device id> }` only. */
 export const RESTORE_CHANNEL = 'vaulttabs_restore';
-export const RESTORE_TTL_MINUTES = 5;
+/**
+ * A request waits this long for its target browser. If that browser is closed, the tab opens the
+ * next time it starts (extensions cannot launch a closed browser).
+ */
+export const RESTORE_TTL_MINUTES = 24 * 60;
+/** At most this many requests queue up per target device; older ones expire. */
+export const RESTORE_QUEUE_MAX = 50;
 
 export type RestoreContent = { snapshotId: string } | { encryptedPayload: string; payloadIv: string };
 
@@ -28,8 +34,8 @@ export class RestoreRepository {
   constructor(private readonly sql: Sql) {}
 
   /**
-   * Create a request (expiring any earlier pending one for the same target) and NOTIFY listeners
-   * on commit. The caller must already have checked that the target device and snapshot are the
+   * Queue a request for the target device (keeping at most RESTORE_QUEUE_MAX pending) and NOTIFY
+   * listeners on commit. The caller must already have checked that the target device and snapshot are the
    * user's.
    */
   async create(userId: string, targetDeviceId: string, content: RestoreContent): Promise<RestoreRequest> {
@@ -38,10 +44,6 @@ export class RestoreRepository {
     const payloadIv = 'payloadIv' in content ? content.payloadIv : null;
 
     return this.sql.begin(async tx => {
-      await tx`
-        UPDATE restore_requests SET status = 'expired', updated_at = NOW()
-        WHERE target_device_id = ${targetDeviceId} AND user_id = ${userId} AND status = 'pending'
-      `;
       const [request] = await tx<RestoreRequest[]>`
         INSERT INTO restore_requests
           (user_id, target_device_id, snapshot_id, encrypted_payload, payload_iv, status, expires_at)
@@ -51,15 +53,29 @@ export class RestoreRepository {
         )
         RETURNING id, target_device_id, snapshot_id, status, error_code, created_at, expires_at
       `;
+      // Bound the queue: expire the oldest pending requests beyond the cap.
+      await tx`
+        UPDATE restore_requests SET status = 'expired', updated_at = NOW()
+        WHERE id IN (
+          SELECT id FROM restore_requests
+          WHERE target_device_id = ${targetDeviceId} AND user_id = ${userId} AND status = 'pending'
+          ORDER BY created_at DESC
+          OFFSET ${RESTORE_QUEUE_MAX}
+        )
+      `;
       // Delivered to every instance's listener when the transaction commits.
       await tx`SELECT pg_notify(${RESTORE_CHANNEL}, ${JSON.stringify({ id: request!.id, d: targetDeviceId })})`;
       return request!;
     });
   }
 
-  /** The newest live pending request for one of the user's devices, with its snapshot. */
-  async findPendingDetail(userId: string, targetDeviceId: string): Promise<PendingRestoreDetail | undefined> {
-    const [row] = await this.sql<PendingRow[]>`
+  /** Live pending requests for one of the user's devices, oldest first, with their snapshots. */
+  async findPendingDetails(
+    userId: string,
+    targetDeviceId: string,
+    onlyId?: string,
+  ): Promise<PendingRestoreDetail[]> {
+    const rows = await this.sql<PendingRow[]>`
       SELECT
         r.id, r.target_device_id, r.created_at, r.expires_at, r.encrypted_payload, r.payload_iv,
         s.id AS s_id, s.device_id AS s_device_id, s.captured_at AS s_captured_at, s.iv AS s_iv,
@@ -71,28 +87,11 @@ export class RestoreRepository {
         AND r.status = 'pending'
         AND r.expires_at > NOW()
         AND (s.id IS NOT NULL OR r.encrypted_payload IS NOT NULL)
-      ORDER BY r.created_at DESC
-      LIMIT 1
+        ${onlyId ? this.sql`AND r.id = ${onlyId}` : this.sql``}
+      ORDER BY r.created_at ASC
+      LIMIT ${RESTORE_QUEUE_MAX}
     `;
-    if (!row) return undefined;
-    return {
-      id: row.id,
-      target_device_id: row.target_device_id,
-      created_at: row.created_at,
-      expires_at: row.expires_at,
-      snapshot: row.s_id
-        ? {
-            id: row.s_id,
-            device_id: row.s_device_id!,
-            captured_at: row.s_captured_at!,
-            iv: row.s_iv!,
-            encrypted_blob: row.s_encrypted_blob!,
-            enc_version: row.s_enc_version!,
-          }
-        : null,
-      encrypted_payload: row.encrypted_payload,
-      payload_iv: row.payload_iv,
-    };
+    return rows.map(toDetail);
   }
 
   /** Status as the client should see it: a pending request past its expiry reads as expired. */
@@ -128,4 +127,25 @@ export class RestoreRepository {
     const [exists] = await this.sql`SELECT 1 FROM restore_requests WHERE id = ${id} AND user_id = ${userId}`;
     return exists ? 'not_pending' : 'not_found';
   }
+}
+
+function toDetail(row: PendingRow): PendingRestoreDetail {
+  return {
+    id: row.id,
+    target_device_id: row.target_device_id,
+    created_at: row.created_at,
+    expires_at: row.expires_at,
+    snapshot: row.s_id
+      ? {
+          id: row.s_id,
+          device_id: row.s_device_id!,
+          captured_at: row.s_captured_at!,
+          iv: row.s_iv!,
+          encrypted_blob: row.s_encrypted_blob!,
+          enc_version: row.s_enc_version!,
+        }
+      : null,
+    encrypted_payload: row.encrypted_payload,
+    payload_iv: row.payload_iv,
+  };
 }

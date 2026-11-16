@@ -1,6 +1,6 @@
 {
   "name": "vaulttabs-pwa",
-  "version": "1.0.0",
+  "version": "1.0.5",
   "private": true,
   "description": "VaultTabs web dashboard (PWA): decrypts and restores your synced tabs locally",
   "license": "MIT",

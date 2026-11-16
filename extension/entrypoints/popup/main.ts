@@ -637,17 +637,18 @@ async function sendToDevice(device: Pick<Device, 'id' | 'device_name'>, urls: st
   }
 }
 
+const QUEUED_AFTER_MS = 12_000;
+
 function pollRestore(requestId: string, deviceName: string): void {
   stopPolling();
   renderSendStatus({ phase: 'waiting', deviceName });
   const started = Date.now();
   pollTimer = setInterval(async () => {
-    if (Date.now() - started > 90_000) {
+    // Not picked up quickly: that browser is closed or asleep. The request stays queued on the
+    // server (24 h) and opens when it next starts. (An extension cannot launch a closed browser.)
+    if (Date.now() - started > QUEUED_AFTER_MS) {
       stopPolling();
-      renderSendStatus({
-        phase: 'error',
-        message: `${deviceName} did not respond. Is that browser open and logged in?`,
-      });
+      renderSendStatus({ phase: 'queued', deviceName });
       return;
     }
     try {
@@ -680,6 +681,7 @@ type SendStatus =
   | { phase: 'sending' }
   | { phase: 'waiting'; deviceName: string }
   | { phase: 'success'; deviceName: string }
+  | { phase: 'queued'; deviceName: string }
   | { phase: 'error'; message: string };
 
 function renderSendStatus(status: SendStatus): void {
@@ -728,6 +730,19 @@ function renderSendStatus(status: SendStatus): void {
         h('div', { className: 'restore-success-icon', text: '✓' }),
         h('div', { className: 'restore-title', text: 'Sent' }),
         h('div', { className: 'restore-desc' }, 'Opened on ', h('strong', { text: status.deviceName }), '.'),
+      );
+      break;
+    case 'queued':
+      content.replaceChildren(
+        h('div', { className: 'restore-success-icon', text: '⏳' }),
+        h('div', { className: 'restore-title', text: 'Queued' }),
+        h(
+          'div',
+          { className: 'restore-desc' },
+          h('strong', { text: status.deviceName }),
+          ' looks closed. It will open there the next time that browser starts (kept for 24 hours).',
+        ),
+        close('OK'),
       );
       break;
     case 'error':

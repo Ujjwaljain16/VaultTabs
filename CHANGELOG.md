@@ -8,6 +8,34 @@ package are versioned together.
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-11-16
+
+### Added
+
+- **Queued send-tab.** Tabs sent to a browser that is closed now wait on the server for up to 24 hours
+  and open the next time that browser starts (extensions cannot launch a closed browser). Several sends
+  queue up (up to 50 per device) and each opens exactly once. The popup and dashboard say "Queued"
+  instead of reporting an error. `GET /restore/pending` and the stream now also return `requests`, the
+  whole queue, oldest first; `request` stays the oldest one for older clients.
+- End-to-end test suite (Playwright): two real Chromium profiles with the built extension, the PWA, the
+  backend and Postgres, covering accounts, sync, send-tab, device identity, sessions, legacy upgrade,
+  the dashboard and robustness. Runs in CI.
+
+### Fixed
+
+- **Security:** a browser signed out by "Sign out everywhere", a password change or recovery kept
+  receiving sent tabs over an already-open restore stream. The stream now re-checks the session before
+  every event.
+- In the extension's Devices view, clicking another device's tab (or "Open all") opened it in the
+  current browser. It now opens in that device's browser; "Here" opens it in the current one.
+- Reinstalling the extension created a duplicate device. The Chrome build now has a fixed extension ID,
+  a same-name device is reused after a reinstall, and devices can be removed from the popup (✕).
+- Logging in again with the pre-filled default name renamed the existing device.
+- An open popup could show a blank login form instead of "Your session ended".
+- Real-time send-tab silently fell back to 3-minute polling behind Neon's pooled endpoint / PgBouncer
+  (`LISTEN` cannot work there). New optional `DATABASE_LISTEN_URL` for multi-instance deployments.
+- The backend build failed on hosts that skip devDependencies (Render).
+
 ## [1.0.0] - 2026-11-16
 
 First open-source release. This version reworks the cryptography so that the server never sees anything

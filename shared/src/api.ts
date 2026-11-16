@@ -244,7 +244,13 @@ export interface PendingRestoreDetail {
  */
 export interface PendingRestoreResponse {
   pending: boolean;
+  /** The oldest queued request (kept for clients older than 1.1). */
   request?: PendingRestoreDetail;
+  /**
+   * Every queued request for this device, oldest first. Requests wait up to 24 h, so tabs sent
+   * to a closed browser open when it next starts. Clients must open each id only once.
+   */
+  requests?: PendingRestoreDetail[];
 }
 
 /** PATCH /restore/:id (auth) — reported by the target device. */

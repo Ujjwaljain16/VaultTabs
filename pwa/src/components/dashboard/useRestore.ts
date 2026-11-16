@@ -13,10 +13,13 @@ export type RestoreState =
   | { phase: 'sending'; deviceName: string; what: string }
   | { phase: 'waiting'; deviceName: string; what: string }
   | { phase: 'success'; deviceName: string; what: string }
+  /** Not picked up yet: that browser is closed. It stays queued (24 h) and opens when it starts. */
+  | { phase: 'queued'; deviceName: string; what: string }
   | { phase: 'error'; deviceName: string; message: string };
 
 const POLL_MS = 2000;
-const MAX_WAIT_MS = 3 * 60_000;
+/** After this long without a pick-up, report "queued" instead of waiting on. */
+const QUEUED_AFTER_MS = 12_000;
 
 function messageFor(code: RestoreErrorCode | null): string {
   return RESTORE_ERROR_MESSAGES[code ?? 'unknown'] ?? RESTORE_ERROR_MESSAGES.unknown;
@@ -55,13 +58,7 @@ export function useRestore(key: CryptoKey, userId: string) {
         if (!alive()) return;
         setState({ phase: 'waiting', deviceName: device.device_name, what });
 
-        const expiresAt = new Date(created.expires_at).getTime();
-        const deadline =
-          Date.now() +
-          Math.min(
-            MAX_WAIT_MS,
-            Number.isFinite(expiresAt) ? Math.max(expiresAt - Date.now() + 5000, 10_000) : MAX_WAIT_MS,
-          );
+        const deadline = Date.now() + QUEUED_AFTER_MS;
 
         while (alive()) {
           await new Promise(r => setTimeout(r, POLL_MS));
@@ -86,15 +83,17 @@ export function useRestore(key: CryptoKey, userId: string) {
             });
             return;
           }
-          if (status.status === 'expired' || Date.now() > deadline) break;
+          if (status.status === 'expired') {
+            setState({
+              phase: 'error',
+              deviceName: device.device_name,
+              message: `The request expired before ${device.device_name} picked it up.`,
+            });
+            return;
+          }
+          if (Date.now() > deadline) break;
         }
-        if (alive()) {
-          setState({
-            phase: 'error',
-            deviceName: device.device_name,
-            message: `${device.device_name} did not pick this up in time. Is that browser running with the VaultTabs extension signed in?`,
-          });
-        }
+        if (alive()) setState({ phase: 'queued', deviceName: device.device_name, what });
       } catch (err) {
         if (alive())
           setState({

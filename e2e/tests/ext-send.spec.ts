@@ -107,28 +107,47 @@ test('the device picker never offers this browser itself', async () => {
   await pb.page.click('#btn-cancel-device-picker');
 });
 
-test('target offline: the request waits, then expires with a clear message', async () => {
+const EXPIRED = siteUrl('expired-send', 'Expired send');
+const LATE_1 = siteUrl('late-one', 'Late one');
+const LATE_2 = siteUrl('late-two', 'Late two');
+
+test('target closed: the send is reported as queued, not as an error', async () => {
   await a.close();
   await pb.page.bringToFront();
-  await pb.sendTab('From Brave', A);
+  await pb.openTabsInThisWindow([EXPIRED, LATE_1, LATE_2]);
+  await pb.reload();
+  await pb.sendTab('Expired send', A);
   await expect(pb.sendStatus()).toContainText('Waiting for device');
-  // Fast-forward the request's 5 minute lifetime.
+  await expect(pb.sendStatus()).toContainText('Queued', { timeout: 25_000 });
+  await expect(pb.sendStatus()).toContainText(`${A} looks closed`);
+  // Queued for ~24 h on the server.
+  const [row] = await db()<{ hours: number }[]>`
+    SELECT EXTRACT(EPOCH FROM (expires_at - created_at)) / 3600 AS hours
+    FROM restore_requests WHERE status = 'pending' ORDER BY created_at DESC LIMIT 1`;
+  expect(Number(row!.hours)).toBeCloseTo(24, 1);
+  // Let this one run out, so it must NOT open when the browser comes back.
   await db()`UPDATE restore_requests SET expires_at = NOW() - INTERVAL '1 second' WHERE status = 'pending'`;
-  await expect(pb.sendStatus()).toContainText('expired before the other browser picked it up');
 });
 
-test('target comes back within the request lifetime: still delivered', async () => {
+test('queued sends open when the closed browser starts: all of them, once each, not expired ones', async () => {
   await pb.dismissSendStatus();
-  const url = siteUrl('late', 'Late delivery');
-  await pb.openTabsInThisWindow([url]);
-  await pb.reload();
-  await pb.sendTab('Late delivery', A);
-  await expect(pb.sendStatus()).toContainText('Waiting for device');
-  await new Promise(r => setTimeout(r, 3000));
+  await pb.sendTab('Late one', A);
+  await expect(pb.sendStatus()).toContainText('Queued', { timeout: 25_000 });
+  await pb.dismissSendStatus();
+  await pb.sendTab('Late two', A);
+  await expect(pb.sendStatus()).toContainText('Queued', { timeout: 25_000 });
 
   a = await ExtBrowser.launch(A, { userDataDir: a.userDataDir });
-  await a.waitForTab(url, 60_000);
-  await expect(pb.sendStatus()).toContainText('Opened on', { timeout: 15_000 });
+  await a.waitForTab(LATE_1, 60_000);
+  await a.waitForTab(LATE_2, 60_000);
+  // Give stream + fallback poll time to (wrongly) open anything twice.
+  await new Promise(r => setTimeout(r, 5000));
+  expect(a.countTabs(LATE_1)).toBe(1);
+  expect(a.countTabs(LATE_2)).toBe(1);
+  expect(a.countTabs(EXPIRED)).toBe(0);
+  const [pending] = await db()<{ n: number }[]>`
+    SELECT COUNT(*)::int AS n FROM restore_requests WHERE status = 'pending' AND expires_at > NOW()`;
+  expect(pending!.n).toBe(0);
 });
 
 test('✕ removes another device after a second click', async () => {

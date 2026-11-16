@@ -144,9 +144,9 @@ export async function restoreRoutes(
 
       const unsubscribe = restoreNotifier.subscribe(deviceId, requestId => {
         stillAuthorized()
-          .then(ok => (ok ? restoreService.pendingUnchecked(userId, deviceId) : null))
+          .then(ok => (ok ? restoreService.pendingOneUnchecked(userId, deviceId, requestId) : null))
           .then(state => {
-            if (state?.pending && state.request?.id === requestId) send(state);
+            if (state?.pending) send(state);
           })
           .catch((err: unknown) => request.log.warn({ err }, 'restore stream: failed to load request'));
       });

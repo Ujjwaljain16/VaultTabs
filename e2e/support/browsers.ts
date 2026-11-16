@@ -128,7 +128,12 @@ export class ExtBrowser {
   /** Close and delete the profile (an uninstall + wipe). */
   async destroy(): Promise<void> {
     await this.close();
-    fs.rmSync(this.userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    try {
+      fs.rmSync(this.userDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+    } catch {
+      // Windows can keep a profile file locked for a moment after Chromium exits. It's a temp
+      // dir: leaving it behind must not fail the test.
+    }
   }
 }
 

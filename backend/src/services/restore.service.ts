@@ -1,5 +1,6 @@
 import type {
   CreateRestoreResponse,
+  PendingRestoreDetail,
   PendingRestoreResponse,
   RestoreErrorCode,
   RestoreRequest,
@@ -29,7 +30,7 @@ export class RestoreService {
     return { request_id: request.id, status: request.status, expires_at: request.expires_at };
   }
 
-  /** Current pending request for one of the caller's devices (404 if the device is not theirs). */
+  /** Queued (pending) requests for one of the caller's devices (404 if the device is not theirs). */
   async pending(userId: string, deviceId: string): Promise<PendingRestoreResponse> {
     await this.devices.assertOwned(userId, deviceId);
     return this.pendingUnchecked(userId, deviceId);
@@ -37,8 +38,12 @@ export class RestoreService {
 
   /** As `pending`, for callers that already verified device ownership (the SSE stream). */
   async pendingUnchecked(userId: string, deviceId: string): Promise<PendingRestoreResponse> {
-    const request = await this.restores.findPendingDetail(userId, deviceId);
-    return request ? { pending: true, request } : { pending: false };
+    return toResponse(await this.restores.findPendingDetails(userId, deviceId));
+  }
+
+  /** One specific pending request (for live delivery of a just-created request). */
+  async pendingOneUnchecked(userId: string, deviceId: string, id: string): Promise<PendingRestoreResponse> {
+    return toResponse(await this.restores.findPendingDetails(userId, deviceId, id));
   }
 
   async complete(
@@ -62,4 +67,9 @@ export class RestoreService {
     if (!request) throw notFound('Restore request not found', 'restore_not_found');
     return request;
   }
+}
+
+/** `request` (oldest) is kept for pre-1.1 extensions; `requests` carries the whole queue. */
+function toResponse(requests: PendingRestoreDetail[]): PendingRestoreResponse {
+  return requests.length > 0 ? { pending: true, request: requests[0], requests } : { pending: false };
 }

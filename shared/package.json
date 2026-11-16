@@ -1,6 +1,6 @@
 {
   "name": "@vaulttabs/shared",
-  "version": "1.0.0",
+  "version": "1.0.5",
   "private": true,
   "description": "Types, API contracts and client-side crypto shared by the VaultTabs backend, extension and PWA",
   "license": "MIT",

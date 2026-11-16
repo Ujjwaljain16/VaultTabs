@@ -66,7 +66,9 @@ export function RestoreStatusDialog({ state, onClose }: { state: RestoreState; o
         ? `Waiting for ${state.deviceName}`
         : state.phase === 'success'
           ? 'Done'
-          : 'Restore failed';
+          : state.phase === 'queued'
+            ? 'Queued'
+            : 'Restore failed';
   return (
     <Dialog title={title} onClose={onClose}>
       <div role="status" aria-live="polite" className={styles.statusBody}>
@@ -87,6 +89,12 @@ export function RestoreStatusDialog({ state, onClose }: { state: RestoreState; o
               Opened on <strong>{state.deviceName}</strong>.
             </p>
           </>
+        )}
+        {state.phase === 'queued' && (
+          <p className={ui.centerText}>
+            <strong>{state.deviceName}</strong> looks closed. The {state.what} will open there the next time
+            that browser starts (kept for 24 hours).
+          </p>
         )}
         {state.phase === 'error' && (
           <>
