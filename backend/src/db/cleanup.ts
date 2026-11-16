@@ -1,86 +1,120 @@
-// Database maintenance job
+// Database maintenance, set-based (a fixed number of statements regardless of user count).
+//
+// Runs in-process every CLEANUP_INTERVAL_MINUTES (see server.ts) and on demand:
+//   npm run db:cleanup            (dev)
+//   node dist/db/cleanup.js       (production)
+// A session-level advisory lock makes concurrent runs (several instances) skip instead of race.
 
-import 'dotenv/config';
-import { fileURLToPath } from 'url';
-import sql from './client.js';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import type { Sql } from './client.js';
+import type { Logger } from '../logger.js';
 
-export async function runCleanup() {
-  const startTime = Date.now();
-  console.log(`[Cleanup] Starting at ${new Date().toISOString()}`);
+const CLEANUP_LOCK_KEY = 7_265_840_212;
+export const RESTORE_HISTORY_DAYS = 7;
+export const IDLE_DEVICE_DAYS = 180;
 
-  let totalExpired = 0;
-  let totalPruned = 0;
-  let totalOrphaned = 0;
+export interface CleanupResult {
+  skipped: boolean;
+  expiredRestores: number;
+  deletedRestores: number;
+  prunedSnapshots: number;
+  deletedDevices: number;
+}
 
+export async function runCleanup(sql: Sql, log?: Logger): Promise<CleanupResult> {
+  const started = Date.now();
+  const result: CleanupResult = {
+    skipped: false,
+    expiredRestores: 0,
+    deletedRestores: 0,
+    prunedSnapshots: 0,
+    deletedDevices: 0,
+  };
+
+  // The lock is per session: reserve one connection for lock, work and unlock.
+  const conn = await sql.reserve();
   try {
-    const expireResult = await sql`
-      UPDATE restore_requests
-      SET status = 'expired', updated_at = NOW()
-      WHERE status = 'pending'
-        AND (expires_at < NOW() OR created_at < NOW() - INTERVAL '10 minutes')
-      RETURNING id
+    const [lock] = await conn<{ locked: boolean }[]>`
+      SELECT pg_try_advisory_lock(${CLEANUP_LOCK_KEY}::bigint) AS locked
     `;
-    totalExpired = expireResult.length;
-    console.log(`[Cleanup] Expired ${totalExpired} stale restore requests`);
+    if (!lock?.locked) {
+      log?.info('cleanup: another instance is running it, skipping');
+      return { ...result, skipped: true };
+    }
 
-    const users = await sql`
-      SELECT id, snapshot_retention FROM users
-      WHERE snapshot_retention > 0
-    `;
-
-    for (const user of users) {
-      const devices = await sql`
-        SELECT id FROM devices WHERE user_id = ${user.id}
-      `;
-
-      for (const device of devices) {
-        const pruneResult = await sql`
-          DELETE FROM snapshots
-          WHERE device_id = ${device.id}
-            AND id NOT IN (
-              SELECT id FROM snapshots
-              WHERE device_id = ${device.id}
-              ORDER BY captured_at DESC
-              LIMIT ${user.snapshot_retention}
-            )
+    try {
+      result.expiredRestores = (
+        await conn`
+          UPDATE restore_requests SET status = 'expired', updated_at = NOW()
+          WHERE status = 'pending' AND expires_at <= NOW()
           RETURNING id
-        `;
-        totalPruned += pruneResult.length;
-      }
+        `
+      ).length;
+
+      result.deletedRestores = (
+        await conn`
+          DELETE FROM restore_requests
+          WHERE created_at < NOW() - make_interval(days => ${RESTORE_HISTORY_DAYS})
+          RETURNING id
+        `
+      ).length;
+
+      // Per device, keep the newest `snapshot_retention` unpinned snapshots of its owner.
+      result.prunedSnapshots = (
+        await conn`
+          DELETE FROM snapshots s
+          USING (
+            SELECT sn.id,
+                   row_number() OVER (PARTITION BY sn.device_id ORDER BY sn.captured_at DESC, sn.id DESC) AS rn,
+                   u.snapshot_retention
+            FROM snapshots sn
+            JOIN users u ON u.id = sn.user_id
+            WHERE NOT sn.pinned
+          ) ranked
+          WHERE s.id = ranked.id AND ranked.rn > ranked.snapshot_retention
+          RETURNING s.id
+        `
+      ).length;
+
+      result.deletedDevices = (
+        await conn`
+          DELETE FROM devices d
+          WHERE d.last_seen < NOW() - make_interval(days => ${IDLE_DEVICE_DAYS})
+            AND NOT EXISTS (SELECT 1 FROM snapshots s WHERE s.device_id = d.id)
+          RETURNING d.id
+        `
+      ).length;
+    } finally {
+      await conn`SELECT pg_advisory_unlock(${CLEANUP_LOCK_KEY}::bigint)`;
     }
 
-    if (totalPruned > 0) {
-      console.log(`[Cleanup] Pruned ${totalPruned} old snapshots`);
-    }
-
-    const orphanResult = await sql`
-      DELETE FROM devices
-      WHERE id IN (
-        SELECT d.id FROM devices d
-        LEFT JOIN snapshots s ON s.device_id = d.id
-        WHERE s.id IS NULL
-          AND d.last_seen < NOW() - INTERVAL '90 days'
-      )
-      RETURNING id
-    `;
-    totalOrphaned = orphanResult.length;
-
-    const [stats] = await sql`
-      SELECT
-        (SELECT COUNT(*) FROM users)            AS user_count,
-        (SELECT COUNT(*) FROM devices)          AS device_count,
-        (SELECT COUNT(*) FROM snapshots)        AS snapshot_count,
-        (SELECT COUNT(*) FROM restore_requests) AS restore_count
-    `;
-
-    const duration = Date.now() - startTime;
-    console.log(`[Cleanup] Complete in ${duration}ms | ${stats.user_count} users | ${stats.device_count} devices | ${stats.snapshot_count} snapshots`);
-
-  } catch (err) {
-    console.error('[Cleanup] Error:', err);
+    log?.info({ ...result, durationMs: Date.now() - started }, 'cleanup complete');
+    return result;
+  } finally {
+    conn.release();
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  runCleanup().then(() => sql.end());
+async function main(): Promise<void> {
+  const { config: loadDotenv } = await import('dotenv');
+  loadDotenv({ override: false, quiet: true });
+  const { loadDatabaseConfig } = await import('../config.js');
+  const { createSql } = await import('./client.js');
+  const { createCliLogger } = await import('../logger.js');
+
+  const log = createCliLogger();
+  const sql = createSql(loadDatabaseConfig(), { max: 1 });
+  try {
+    await runCleanup(sql, log);
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
+
+if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+  main().catch(err => {
+    process.stderr.write(`Cleanup failed: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exit(1);
+  });
 }

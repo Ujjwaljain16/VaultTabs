@@ -1,83 +1,56 @@
-import { IDeviceService } from '../interfaces/device.service.js';
-import { IDeviceRepository } from '../interfaces/device.repository.js';
-import { Device } from '../interfaces/models.js';
+import type { Device } from '@vaulttabs/shared';
+import { conflict, notFound } from '../errors.js';
+import type { DeviceRepository } from '../repositories/device.repository.js';
+import { isUuid } from '../schemas.js';
 
-export class DeviceService implements IDeviceService {
-    constructor(private deviceRepository: IDeviceRepository) { }
+export class DeviceService {
+  constructor(
+    private readonly devices: DeviceRepository,
+    private readonly maxDevicesPerUser: number,
+  ) {}
 
-    async registerDevice(userId: string, name: string, fingerprint?: string, deviceId?: string): Promise<Device> {
-        // 1. Try finding by deviceId first (most reliable)
-        if (deviceId) {
-            const existing = await this.deviceRepository.findByDeviceId(deviceId);
-            if (existing && existing.user_id === userId) {
-                return this.deviceRepository.upsert({
-                    ...existing,
-                    device_name: name,
-                    last_seen: new Date(),
-                });
-            }
-        }
-
-        // 2. Try finding by fingerprint + name (robust identification for profiles on same machine)
-        if (fingerprint) {
-            const existing = await this.deviceRepository.findByFingerprint(userId, fingerprint);
-            // Only reuse if the name ALSO matches, or if we don't have a name match elsewhere.
-            // This prevents "hijacking" a different profile's device record.
-            if (existing && existing.device_name === name) {
-                return this.deviceRepository.upsert({
-                    ...existing,
-                    last_seen: new Date(),
-                });
-            }
-        }
-
-        // 3. Otherwise create new
-        return this.deviceRepository.upsert({
-            id: deviceId || crypto.randomUUID(),
-            user_id: userId,
-            device_name: name,
-            fingerprint,
-            last_seen: new Date(),
-        });
+  /**
+   * Re-register an existing device of the caller (refreshing name and last_seen), or create a new
+   * one. A supplied `id` that does not exist or belongs to someone else is ignored: the new device
+   * always gets a fresh server-generated id.
+   */
+  async register(userId: string, deviceName: string, id?: string): Promise<Device> {
+    if (id && isUuid(id)) {
+      const existing = await this.devices.touchOwned(userId, id, deviceName);
+      if (existing) return existing;
     }
-
-    async listDevices(userId: string): Promise<Device[]> {
-        return this.deviceRepository.findByUserId(userId);
+    const created = await this.devices.createWithinLimit(userId, deviceName, this.maxDevicesPerUser);
+    if (!created) {
+      throw conflict(
+        `You have reached the limit of ${this.maxDevicesPerUser} devices. Remove an unused device first.`,
+        'device_limit',
+      );
     }
+    return created;
+  }
 
-    async updateDeviceName(userId: string, deviceId: string, name: string): Promise<Device> {
-        const device = await this.deviceRepository.findByDeviceId(deviceId);
-        if (!device || device.user_id !== userId) {
-            throw new Error('Device not found or access denied');
-        }
+  list(userId: string): Promise<Device[]> {
+    return this.devices.listByUser(userId);
+  }
 
-        return this.deviceRepository.upsert({
-            ...device,
-            device_name: name,
-            last_seen: new Date(),
-        });
-    }
+  async heartbeat(userId: string, id: string): Promise<void> {
+    if (!(await this.devices.touchOwned(userId, id))) throw notFound('Device not found', 'device_not_found');
+  }
 
-    async deleteDevice(userId: string, deviceId: string): Promise<void> {
-        const device = await this.deviceRepository.findByDeviceId(deviceId);
-        if (!device || device.user_id !== userId) {
-            throw new Error('Device not found or access denied');
-        }
+  async rename(userId: string, id: string, deviceName: string): Promise<Device> {
+    const device = await this.devices.rename(userId, id, deviceName);
+    if (!device) throw notFound('Device not found', 'device_not_found');
+    return device;
+  }
 
-        await this.deviceRepository.delete(deviceId);
-    }
+  async remove(userId: string, id: string): Promise<void> {
+    if (!(await this.devices.deleteOwned(userId, id))) throw notFound('Device not found', 'device_not_found');
+  }
 
-    async heartbeat(userId: string, deviceId: string): Promise<void> {
-        const device = await this.deviceRepository.findByDeviceId(deviceId);
-        if (!device || device.user_id !== userId) {
-            // If device doesn't exist, we could auto-create it or throw.
-            // Current routes expect it to exist if it was registered.
-            return;
-        }
-
-        await this.deviceRepository.upsert({
-            ...device,
-            last_seen: new Date(),
-        });
-    }
+  /** Throws 404 unless the device exists and is the caller's. */
+  async assertOwned(userId: string, id: string): Promise<Device> {
+    const device = await this.devices.findOwned(userId, id);
+    if (!device) throw notFound('Device not found', 'device_not_found');
+    return device;
+  }
 }

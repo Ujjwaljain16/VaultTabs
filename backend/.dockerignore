@@ -1,3 +1,5 @@
+# Used only when building with backend/ as the context. The compose build uses the repo root
+# as context and the root .dockerignore.
 node_modules
 dist
 .env

@@ -1,70 +1,113 @@
-import { defineConfig } from 'wxt';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { defineConfig, type ConfigEnv, type UserManifest } from 'wxt';
 
 /**
- * Host permissions are scoped to the configured backend (VITE_API_URL) when it is set at build
- * time. If it is not set we fall back to any-HTTPS so a build without .env still works - set
- * VITE_API_URL to get the narrower permission set.
+ * Build-time configuration. WXT loads `.env`, `.env.local`, `.env.[mode]`, `.env.[mode].local`
+ * (and browser-specific variants) into process.env before `manifest()` runs; real environment
+ * variables take precedence. See .env.example.
  */
-function readViteApiUrl(): string | undefined {
-  if (process.env.VITE_API_URL) return process.env.VITE_API_URL;
-  // WXT does not put .env files into process.env for this config file, so read them directly.
-  for (const file of ['.env.production.local', '.env.local', '.env']) {
-    if (!existsSync(file)) continue;
-    const match = readFileSync(file, 'utf8').match(/^\s*VITE_API_URL\s*=\s*(.+?)\s*$/m);
-    if (match) return match[1].replace(/^['"]|['"]$/g, '');
-  }
-  return undefined;
+
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as {
+  version: string;
+};
+
+const DEV_API_URL = 'http://localhost:3000/api/v1';
+
+// Placeholder only: AMO assigns/accepts a real ID when you publish. Set VITE_FIREFOX_EXTENSION_ID.
+const DEFAULT_FIREFOX_ID = 'vaulttabs@example.invalid';
+
+function isLocalHost(hostname: string): boolean {
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '[::1]' ||
+    hostname.endsWith('.localhost')
+  );
 }
 
-function backendHostPermissions(): string[] {
-  const local = ['http://localhost:3000/*', 'https://localhost:3000/*'];
-  const apiUrl = readViteApiUrl();
-  if (apiUrl) {
-    try {
-      const u = new URL(apiUrl);
-      return [...local, `${u.protocol}//${u.host}/*`];
-    } catch { /* fall through */ }
+/** Resolves and validates the backend origin. Throws (fails the build) on unsafe production config. */
+function resolveApiOrigin({ mode, command }: ConfigEnv): string {
+  const isDev = mode === 'development';
+  const raw = process.env.VITE_API_URL?.trim();
+  if (!raw) {
+    if (isDev) return new URL(DEV_API_URL).origin;
+    throw new Error(
+      `[vaulttabs] VITE_API_URL is required for "${command}" in mode "${mode}". ` +
+        'Set it in the environment or extension/.env.production.local, e.g. VITE_API_URL=https://api.example.com/api/v1',
+    );
   }
-  return [...local, 'https://*/*'];
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`[vaulttabs] VITE_API_URL is not a valid URL: ${raw}`);
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error(`[vaulttabs] VITE_API_URL must be http(s): ${raw}`);
+  }
+  if (!isDev && url.protocol === 'http:' && !isLocalHost(url.hostname)) {
+    throw new Error(`[vaulttabs] VITE_API_URL must use https outside development (got ${url.origin}).`);
+  }
+  return url.origin;
 }
 
-/**
- * WXT Configuration
- *
- * PERMISSIONS EXPLAINED:
- * - "tabs"     → Read open tabs (URL, title, favicon, position)
- * - "storage"  → Save JWT token, deviceId, sync state in browser storage
- * - "alarms"   → Schedule the debounce timer and 3-minute fallback
- *                 (chrome.alarms survive service worker sleep; setTimeout does not)
- *
- * HOST PERMISSIONS:
- * - localhost:3000 → your local backend during development
- * - Add your production URL here when you deploy
- */
+function buildCsp(apiOrigin: string, isDev: boolean): string {
+  // In dev, WXT adds its dev-server origin to script-src and needs a websocket for HMR, so only
+  // the script/object restrictions apply there.
+  if (isDev) return "script-src 'self'; object-src 'none'";
+  return [
+    "default-src 'self'",
+    "script-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+    `connect-src 'self' ${apiOrigin}`,
+    // Favicons of the user's own open tabs (http(s) or data: URLs reported by the browser).
+    "img-src 'self' data: https: http:",
+    "style-src 'self'",
+    "font-src 'self'",
+  ].join('; ');
+}
+
+const icons = { 16: 'icon-16.png', 32: 'icon-32.png', 48: 'icon-48.png', 128: 'icon-128.png' };
+
 export default defineConfig({
-  manifest: {
-    name: 'VaultTabs',
-    description: 'Cross-browser tab sync with client-side encrypted snapshots',
-    version: '0.1.0',
-    permissions: ['tabs', 'storage', 'alarms', 'windows'],
-    icons: {
-      16: 'icon-16.png',
-      32: 'icon-32.png',
-      48: 'icon-48.png',
-      128: 'icon-128.png',
-    },
-    action: {
-      default_title: 'VaultTabs',
-      default_popup: 'popup.html',
-      default_icon: {
-        16: 'icon-16.png',
-        32: 'icon-32.png',
-        48: 'icon-48.png',
-        128: 'icon-128.png',
-      },
-    },
-    // Local dev endpoints + the backend from VITE_API_URL (see backendHostPermissions above)
-    host_permissions: backendHostPermissions(),
+  // Explicit imports only (no auto-imported globals).
+  imports: false,
+  manifest: (env): UserManifest => {
+    const isDev = env.mode === 'development';
+    const apiOrigin = resolveApiOrigin(env);
+
+    const hostPermissions = new Set([`${apiOrigin}/*`]);
+    if (isDev) hostPermissions.add('http://localhost:3000/*');
+
+    const manifest: UserManifest = {
+      name: 'VaultTabs',
+      description: 'Cross-browser tab sync with end-to-end encrypted snapshots',
+      version: pkg.version,
+      // `windows` is not a permission: chrome.windows works without one.
+      permissions: ['tabs', 'storage', 'alarms'],
+      host_permissions: [...hostPermissions],
+      icons,
+      action: { default_title: 'VaultTabs', default_icon: icons },
+      content_security_policy: { extension_pages: buildCsp(apiOrigin, isDev) },
+    };
+
+    if (env.browser === 'firefox') {
+      manifest.browser_specific_settings = {
+        gecko: {
+          id: process.env.VITE_FIREFOX_EXTENSION_ID?.trim() || DEFAULT_FIREFOX_ID,
+          // 140 is the first ESR with built-in data-collection consent.
+          strict_min_version: '140.0',
+          data_collection_permissions: {
+            // Account email, a password-derived login key, and (end-to-end encrypted) open tabs
+            // are sent to the configured VaultTabs server.
+            required: ['personallyIdentifyingInfo', 'authenticationInfo', 'browsingActivity'],
+          },
+        },
+      };
+    }
+    return manifest;
   },
 });

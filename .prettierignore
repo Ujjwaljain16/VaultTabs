@@ -1,0 +1,24 @@
+# Lockfiles
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Dependencies and build output
+node_modules/
+dist/
+.next/
+.output/
+.wxt/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# Static/binary assets and generated files
+pwa/public/
+extension/public/
+*.zip
+*.min.js
+
+# Environment files
+.env
+.env.*

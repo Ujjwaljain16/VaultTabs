@@ -1,173 +1,261 @@
 /**
- * utils/storage.ts
+ * Persistent extension state.
  *
- * Manages ALL persistent storage for the extension.
- *
- * TWO STORAGE SYSTEMS:
- *
- * 1. chrome.storage.local  → Simple key/value, survives restart, 10MB limit.
- *    Used for: JWT token, user info, device ID, sync stats, error state.
- *    Cannot store CryptoKey objects (not serializable).
- *
- * 2. IndexedDB (via "idb") → Full in-browser database.
- *    Used for: the CryptoKey master key object (stored natively, not serialized).
- *    Sandboxed to the extension — web pages cannot access it.
- *
- * SECURITY NOTE ON MASTER KEY IN INDEXEDDB:
- * The master key is marked non-extractable, so its raw bytes cannot be read
- * back out of the CryptoKey object by script. IndexedDB stores the opaque handle.
- * This limits key EXFILTRATION only: it is not encrypted under a password while
- * stored, and any code running inside the extension (or someone with access to
- * the unlocked browser profile) can still USE it to decrypt snapshots.
- * The JWT in chrome.storage.local is likewise stored unencrypted.
- *
- * PRIVACY NOTE ON chrome.storage.sync:
- * device_id and device_name are mirrored to chrome.storage.sync so a reinstall
- * can re-identify the device. That data is synced by the browser vendor
- * (Google / Mozilla). No keys, tokens or tab data are written there.
+ * - storage.local: session (token, user), sync status, settings, per-user device ids.
+ * - storage.sync:  only the `device_ids` map (user id → device id), so a reinstall on the same
+ *                  browser profile keeps its device identity. Synced by the browser vendor; it
+ *                  contains no keys, tokens or tab data.
+ * - IndexedDB:     the master key as a NON-EXTRACTABLE CryptoKey bound to a user id. Script can
+ *                  use it but cannot read its bytes. It is not password-protected at rest: anyone
+ *                  with access to the unlocked browser profile can use it.
  */
 
-import { openDB, DBSchema, IDBPDatabase } from 'idb';
+import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import { browser } from 'wxt/browser';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CHROME STORAGE SCHEMA
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface ExtensionStorageData {
-  // Auth
-  jwt_token?: string;   // JWT from server — sent with every API request
-  user_id?: string;   // UUID from server
-  user_email?: string;   // For display in popup
-  is_logged_in?: boolean;  // Quick flag — avoids parsing token on every check
-
-  // Device
-  device_id?: string;   // UUID from server after device registration
-  device_name?: string;   // e.g. "Chrome on Mac"
-
-  // Sync state — used by popup to show status
-  last_sync_at?: string;  // ISO timestamp of last successful upload
-  sync_count?: number;  // Total number of successful syncs this session
-  last_tab_count?: number; // How many tabs were in the last snapshot
-  last_error?: string;  // Last sync error message (shown in popup)
-
-  // Master key re-login guard
-  // We store this flag so on browser restart we know to check IndexedDB.
-  // If the key is missing from IndexedDB (e.g. storage was cleared),
-  // we show a re-login prompt instead of silently failing.
-  master_key_stored?: boolean;
+export interface LastUpload {
+  user_id: string;
+  device_id: string;
+  hash: string;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CHROME STORAGE HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
+export interface LocalState {
+  token?: string;
+  user_id?: string;
+  user_email?: string;
+  device_name?: string;
+  /** user id → this browser's device id for that user. Kept on logout. */
+  device_ids?: Record<string, string>;
 
-export async function saveToStorage(data: Partial<ExtensionStorageData>): Promise<void> {
-  return new Promise((resolve, reject) => {
-    chrome.storage.local.set(data, () => {
-      if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
+  last_sync_at?: string;
+  last_tab_count?: number;
+  sync_count?: number;
+  last_error?: string;
+  last_upload?: LastUpload;
 
-      // Mirror device identity to SYNC storage for cross-install persistence
-      const syncData: Partial<ExtensionStorageData> = {};
-      if (data.device_id) syncData.device_id = data.device_id;
-      if (data.device_name) syncData.device_name = data.device_name;
+  /** Email to pre-fill on the re-login screen after a session ended. */
+  relogin_email?: string;
 
-      if (Object.keys(syncData).length > 0) {
-        chrome.storage.sync.set(syncData, () => {
-          // Ignore sync errors — localized failure shouldn't block local save
-          resolve();
-        });
-      } else {
-        resolve();
-      }
-    });
-  });
+  /** Normalized host names that are never synced (see utils/domains.ts). */
+  excluded_domains?: string[];
+  sync_paused?: boolean;
+
+  /** Lower-cased email → highest kdf_version seen (KDF downgrade protection). Kept on logout. */
+  kdf_versions?: Record<string, number>;
 }
 
-export async function loadFromStorage(): Promise<ExtensionStorageData> {
-  return new Promise((resolve, reject) => {
-    chrome.storage.local.get(null, (local) => {
-      if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
+export type StateKey = keyof LocalState;
 
-      const localData = local as ExtensionStorageData;
+const SESSION_KEYS: StateKey[] = [
+  'token',
+  'user_id',
+  'user_email',
+  'device_name',
+  'last_sync_at',
+  'last_tab_count',
+  'sync_count',
+  'last_error',
+  'last_upload',
+];
 
-      // If missing device info, check SYNC storage (e.g. after reinstall)
-      if (!localData.device_id) {
-        chrome.storage.sync.get(['device_id', 'device_name'], (sync) => {
-          resolve({
-            ...localData,
-            device_id: sync.device_id || localData.device_id,
-            device_name: sync.device_name || localData.device_name,
-          });
-        });
-      } else {
-        resolve(localData);
-      }
-    });
-  });
+/** Keys written by versions before 1.0 that are no longer used. */
+const LEGACY_KEYS = ['jwt_token', 'is_logged_in', 'device_id', 'master_key_stored'];
+
+export async function loadState(): Promise<LocalState> {
+  return (await browser.storage.local.get(null)) as LocalState;
 }
 
-export async function clearStorage(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    // Note: We do NOT clear chrome.storage.sync here.
-    // Logging out clears local identity, but allows "re-identification" via sync on next login.
-    chrome.storage.local.get(['device_id', 'device_name'], (preserved) => {
-      chrome.storage.local.clear(() => {
-        if (chrome.runtime.lastError) {
-          return reject(chrome.runtime.lastError);
-        }
-        chrome.storage.local.set(preserved, () => {
-          if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
-          else resolve();
-        });
-      });
-    });
-  });
+/** Writes defined values and removes keys explicitly set to undefined. */
+export async function patchState(patch: Partial<LocalState>): Promise<void> {
+  const set: Record<string, unknown> = {};
+  const remove: string[] = [];
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) remove.push(key);
+    else set[key] = value;
+  }
+  if (Object.keys(set).length > 0) await browser.storage.local.set(set);
+  if (remove.length > 0) await browser.storage.local.remove(remove);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// INDEXEDDB — master key storage
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── KDF downgrade protection ──────────────────────────────────────────────────────────────────
+
+export async function getKnownKdfVersion(email: string): Promise<number> {
+  const { kdf_versions } = await loadState();
+  return kdf_versions?.[email.trim().toLowerCase()] ?? 0;
+}
+
+export async function recordKdfVersion(email: string, version: number): Promise<void> {
+  const key = email.trim().toLowerCase();
+  const { kdf_versions = {} } = await loadState();
+  if ((kdf_versions[key] ?? 0) >= version) return;
+  await browser.storage.local.set({ kdf_versions: { ...kdf_versions, [key]: version } });
+}
+
+// ─── Device ids (per user) ─────────────────────────────────────────────────────────────────────
+
+async function loadSyncedDeviceIds(): Promise<Record<string, string>> {
+  try {
+    const { device_ids } = (await browser.storage.sync.get('device_ids')) as {
+      device_ids?: Record<string, string>;
+    };
+    return device_ids && typeof device_ids === 'object' ? device_ids : {};
+  } catch {
+    return {}; // storage.sync can be disabled (e.g. by policy)
+  }
+}
+
+export async function getDeviceId(userId: string): Promise<string | undefined> {
+  const { device_ids } = await loadState();
+  return device_ids?.[userId] ?? (await loadSyncedDeviceIds())[userId];
+}
+
+export async function setDeviceId(userId: string, deviceId: string): Promise<void> {
+  const { device_ids } = await loadState();
+  const map = { ...(await loadSyncedDeviceIds()), ...device_ids, [userId]: deviceId };
+  await browser.storage.local.set({ device_ids: map });
+  try {
+    await browser.storage.sync.set({ device_ids: map });
+  } catch {
+    // Mirroring is best effort.
+  }
+}
+
+// ─── Master key (IndexedDB) ────────────────────────────────────────────────────────────────────
+
+interface StoredKey {
+  user_id: string;
+  key: CryptoKey;
+}
 
 interface VaultTabsDB extends DBSchema {
-  'crypto-keys': {
-    key: string;
-    value: CryptoKey;
-  };
+  'crypto-keys': { key: string; value: StoredKey };
 }
 
-let db: IDBPDatabase<VaultTabsDB> | null = null;
+const MASTER_KEY_ID = 'master_key';
+let dbPromise: Promise<IDBPDatabase<VaultTabsDB>> | null = null;
 
-async function getDB(): Promise<IDBPDatabase<VaultTabsDB>> {
-  if (db) return db;
-  db = await openDB<VaultTabsDB>('vaulttabs', 1, {
-    upgrade(database) {
-      if (!database.objectStoreNames.contains('crypto-keys')) {
-        database.createObjectStore('crypto-keys');
-      }
+function getDB(): Promise<IDBPDatabase<VaultTabsDB>> {
+  dbPromise ??= openDB<VaultTabsDB>('vaulttabs', 2, {
+    upgrade(db, oldVersion, _newVersion, tx) {
+      if (!db.objectStoreNames.contains('crypto-keys')) db.createObjectStore('crypto-keys');
+      // v1 stored a bare (possibly extractable) key without an owner: drop it.
+      else if (oldVersion < 2) void tx.objectStore('crypto-keys').clear();
     },
   });
-  return db;
+  return dbPromise;
 }
 
-export async function saveMasterKey(masterKey: CryptoKey): Promise<void> {
-  const database = await getDB();
-  await database.put('crypto-keys', masterKey, 'master_key');
-  // Mark in chrome.storage that the key exists in IndexedDB
-  await saveToStorage({ master_key_stored: true });
+export async function saveMasterKey(userId: string, key: CryptoKey): Promise<void> {
+  if (key.extractable) throw new Error('Refusing to store an extractable master key');
+  await (await getDB()).put('crypto-keys', { user_id: userId, key }, MASTER_KEY_ID);
 }
 
-export async function loadMasterKey(): Promise<CryptoKey | null> {
+export async function loadMasterKey(userId: string): Promise<CryptoKey | null> {
   try {
-    const database = await getDB();
-    const key = await database.get('crypto-keys', 'master_key');
-    return key ?? null;
+    const stored = await (await getDB()).get('crypto-keys', MASTER_KEY_ID);
+    return stored && stored.user_id === userId && stored.key instanceof CryptoKey ? stored.key : null;
   } catch {
     return null;
   }
 }
 
 export async function clearMasterKey(): Promise<void> {
-  const database = await getDB();
-  await database.delete('crypto-keys', 'master_key');
-  await saveToStorage({ master_key_stored: false });
+  try {
+    await (await getDB()).delete('crypto-keys', MASTER_KEY_ID);
+  } catch {
+    // Nothing to clear.
+  }
+}
+
+// ─── Session ───────────────────────────────────────────────────────────────────────────────────
+
+export interface ActiveSession {
+  token: string;
+  userId: string;
+  email: string;
+  deviceId: string;
+  deviceName: string;
+  masterKey: CryptoKey;
+}
+
+/** The fully usable session, or null if logged out / locked (no master key) / no device. */
+export async function getActiveSession(): Promise<ActiveSession | null> {
+  const state = await loadState();
+  if (!state.token || !state.user_id) return null;
+  const [deviceId, masterKey] = await Promise.all([getDeviceId(state.user_id), loadMasterKey(state.user_id)]);
+  if (!deviceId || !masterKey) return null;
+  return {
+    token: state.token,
+    userId: state.user_id,
+    email: state.user_email ?? '',
+    deviceId,
+    deviceName: state.device_name ?? '',
+    masterKey,
+  };
+}
+
+export interface NewSession {
+  token: string;
+  userId: string;
+  email: string;
+  deviceId: string;
+  deviceName: string;
+  masterKey: CryptoKey;
+}
+
+/**
+ * Persists a freshly authenticated session. The token is written last: the background script
+ * starts syncing when it appears, and by then the key and device id are in place.
+ */
+export async function startSession(s: NewSession): Promise<void> {
+  await saveMasterKey(s.userId, s.masterKey);
+  await setDeviceId(s.userId, s.deviceId);
+  await patchState({
+    user_id: s.userId,
+    user_email: s.email,
+    device_name: s.deviceName,
+    sync_count: 0,
+    last_sync_at: undefined,
+    last_tab_count: undefined,
+    last_error: undefined,
+    relogin_email: undefined,
+  });
+  await patchState({ token: s.token });
+}
+
+/** Explicit logout: forget the session and key; keep device ids and settings. */
+export async function logout(): Promise<void> {
+  await browser.storage.local.remove([...SESSION_KEYS, 'relogin_email']);
+  await clearMasterKey();
+}
+
+/**
+ * The server says the session is gone. Only acts if `token` is still the current token, so a
+ * late response for an old session cannot end a newer one.
+ */
+export async function endSession(token: string, message: string): Promise<boolean> {
+  const state = await loadState();
+  if (!state.token || state.token !== token) return false;
+  await browser.storage.local.remove(SESSION_KEYS);
+  await clearMasterKey();
+  await patchState({ last_error: message, relogin_email: state.user_email });
+  return true;
+}
+
+/** One-time migration from the pre-1.0 storage layout. */
+export async function migrateLegacyState(): Promise<void> {
+  const legacy = (await browser.storage.local.get(LEGACY_KEYS)) as Record<string, unknown>;
+  if (Object.keys(legacy).length === 0) return;
+  const state = await loadState();
+  if (typeof legacy.device_id === 'string' && state.user_id && !state.device_ids?.[state.user_id]) {
+    await setDeviceId(state.user_id, legacy.device_id);
+  }
+  // Old sessions used the legacy key format; require a fresh login.
+  await browser.storage.local.remove([...LEGACY_KEYS, ...SESSION_KEYS]);
+  await clearMasterKey();
+  try {
+    await browser.storage.sync.remove(['device_id', 'device_name']);
+  } catch {
+    // ignore
+  }
 }

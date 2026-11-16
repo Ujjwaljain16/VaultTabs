@@ -1,0 +1,68 @@
+name: Bug report
+description: Something does not work as expected.
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug!
+        **Security issues must not be reported here.** Use a [private security advisory](https://github.com/Ujjwaljain16/VaultTabs/security/advisories/new) instead.
+        Never paste tokens, recovery codes, passwords, `.env` files or your tab URLs into an issue.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      multiple: true
+      options:
+        - Extension (Chrome / Chromium)
+        - Extension (Firefox)
+        - Web dashboard (PWA)
+        - Backend / API
+        - Docker / self-hosting
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: VaultTabs version or commit
+      placeholder: v1.0.0 / abc1234
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment
+      options:
+        - Self-hosted (Docker Compose)
+        - Self-hosted (other)
+        - Hosted instance
+        - Local development
+  - type: input
+    id: environment
+    attributes:
+      label: Browser and OS
+      placeholder: Chrome 142 on Windows 11, Firefox 145 on Ubuntu 24.04
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / console output
+      description: Backend logs, browser console or extension service worker console. Remove any secrets first.
+      render: text

@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest an idea or improvement.
+labels: [enhancement, triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what makes it hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How could VaultTabs solve this? Mockups or examples are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: privacy
+    attributes:
+      label: Privacy / security impact
+      description: Would this change what the server can see, or touch authentication or cryptography?
+      options:
+        - No impact
+        - Changes what the server can see (metadata)
+        - Touches authentication or cryptography
+        - Not sure
+    validations:
+      required: true
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I would like to work on this myself.

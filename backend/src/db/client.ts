@@ -1,33 +1,32 @@
-// Configures the connection pool to PostgreSQL securely utilizing postgres.js
+// postgres.js connection pool factory. No module-level state: callers own the client and must
+// `await sql.end()` when done.
 
 import postgres from 'postgres';
-import 'dotenv/config'; // Load .env file automatically
+import type { DatabaseConfig } from '../config.js';
 
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    'DATABASE_URL is not set in your .env file.\n' +
-    'Copy .env.example to .env and fill in your PostgreSQL connection string.'
-  );
+export type Sql = postgres.Sql;
+/** Anything that can run a tagged-template query: the pool or a transaction. */
+export type Queryable = postgres.ISql;
+export type TransactionSql = postgres.TransactionSql;
+
+export function createSql(config: DatabaseConfig, options: { max?: number } = {}): Sql {
+  // DATABASE_SSL:
+  //   require  (default) TLS with certificate verification (Neon, RDS, ...)
+  //   insecure TLS without certificate verification (self-signed only; MITM-able)
+  //   disable  no TLS (database on the same private/Docker network only)
+  const ssl =
+    config.databaseSsl === 'disable'
+      ? false
+      : config.databaseSsl === 'insecure'
+        ? { rejectUnauthorized: false }
+        : { rejectUnauthorized: true };
+
+  return postgres(config.databaseUrl, {
+    max: options.max ?? config.databasePoolMax,
+    ssl,
+    idle_timeout: 60,
+    connect_timeout: 15,
+    // Silence NOTICE messages (e.g. "relation already exists, skipping" from IF NOT EXISTS).
+    onnotice: () => {},
+  });
 }
-
-// Create the SQL client (connection pool)
-// `postgres` library automatically handles connection pooling
-
-// TLS to Postgres.
-//   DATABASE_SSL=require   (default) TLS with certificate verification (Neon, Railway, RDS, ...)
-//   DATABASE_SSL=insecure  TLS but do NOT verify the server certificate (self-signed DBs only;
-//                          vulnerable to man-in-the-middle - avoid on untrusted networks)
-//   DATABASE_SSL=disable   no TLS (only for a database on the same private/Docker network)
-const dbSsl = (process.env.DATABASE_SSL || 'require').toLowerCase();
-const ssl =
-  dbSsl === 'disable' ? false :
-  dbSsl === 'insecure' ? { rejectUnauthorized: false } :
-  { rejectUnauthorized: true };
-
-export const sql = postgres(process.env.DATABASE_URL, {
-  max: 10,
-  debug: process.env.NODE_ENV === 'development',
-  ssl,
-});
-
-export default sql;

@@ -1,0 +1,53 @@
+/* Settings page */
+
+.dl {
+  display: grid;
+  grid-template-columns: minmax(90px, max-content) 1fr;
+  gap: 6px 16px;
+  font-size: 12.5px;
+}
+.dl dt {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding-top: 2px;
+}
+.dl dd {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 420px;
+}
+
+.inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.inline input,
+.inline select {
+  width: auto;
+  flex: 0 1 180px;
+}
+
+@media (max-width: 420px) {
+  .dl {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+  .dl dd {
+    margin-bottom: 6px;
+  }
+  .inline input,
+  .inline select {
+    flex: 1 1 100%;
+  }
+}

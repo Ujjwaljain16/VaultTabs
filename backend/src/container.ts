@@ -1,46 +1,39 @@
-import { PostgresUserRepository } from './repositories/postgresUser.repository.js';
-import { PostgresDeviceRepository } from './repositories/postgresDevice.repository.js';
-import { PostgresSnapshotRepository } from './repositories/postgresSnapshot.repository.js';
-import { PostgresRestoreRepository } from './repositories/postgresRestore.repository.js';
-
-import { AuthService } from './services/auth.service.js';
-import { DeviceService } from './services/device.service.js';
-import { SyncService } from './services/sync.service.js';
-import { RestoreService } from './services/restore.service.js';
+import { LIMITS } from '@vaulttabs/shared';
+import type { Config } from './config.js';
+import type { Sql } from './db/client.js';
+import type { Logger } from './logger.js';
+import { DeviceRepository } from './repositories/device.repository.js';
+import { RestoreRepository } from './repositories/restore.repository.js';
+import { SnapshotRepository } from './repositories/snapshot.repository.js';
+import { UserRepository } from './repositories/user.repository.js';
 import { AccountService } from './services/account.service.js';
+import { AuthService, type SignToken } from './services/auth.service.js';
+import { DeviceService } from './services/device.service.js';
+import { RestoreNotifier } from './services/restore.notifier.js';
+import { RestoreService } from './services/restore.service.js';
+import { SnapshotService } from './services/snapshot.service.js';
 
-import { FastifyInstance } from 'fastify';
+export function createContainer(deps: { config: Config; sql: Sql; signToken: SignToken; log: Logger }) {
+  const { config, sql, signToken, log } = deps;
 
-export function createContainer(fastify: FastifyInstance) {
-    // Repositories
-    const userRepository = new PostgresUserRepository();
-    const deviceRepository = new PostgresDeviceRepository();
-    const snapshotRepository = new PostgresSnapshotRepository();
-    const restoreRepository = new PostgresRestoreRepository();
+  const userRepository = new UserRepository(sql);
+  const deviceRepository = new DeviceRepository(sql);
+  const snapshotRepository = new SnapshotRepository(sql);
+  const restoreRepository = new RestoreRepository(sql);
 
-    // Services
-    const authService = new AuthService(
-        userRepository,
-        process.env.JWT_SECRET as string,
-        (payload, options) => fastify.jwt.sign(payload, options)
-    );
+  const deviceService = new DeviceService(deviceRepository, config.maxDevicesPerUser);
 
-    const deviceService = new DeviceService(deviceRepository);
-
-    const syncService = new SyncService(snapshotRepository, deviceRepository, userRepository);
-
-    const restoreService = new RestoreService(restoreRepository, snapshotRepository, deviceRepository);
-
-    const accountService = new AccountService(userRepository, deviceRepository, snapshotRepository);
-
-    return {
-        authService,
-        deviceService,
-        syncService,
-        restoreService,
-        accountService,
-        userRepository,
-    };
+  return {
+    config,
+    sql,
+    userRepository,
+    authService: new AuthService(userRepository, signToken, config.preloginSecret),
+    deviceService,
+    snapshotService: new SnapshotService(snapshotRepository, deviceService, LIMITS.maxSavedSessions),
+    restoreService: new RestoreService(restoreRepository, snapshotRepository, deviceService),
+    accountService: new AccountService(userRepository, deviceRepository, snapshotRepository),
+    restoreNotifier: new RestoreNotifier(sql, log),
+  };
 }
 
 export type Container = ReturnType<typeof createContainer>;

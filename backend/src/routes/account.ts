@@ -1,119 +1,55 @@
-import { FastifyInstance } from 'fastify';
+import type { FastifyInstance } from 'fastify';
+import { LIMITS } from '@vaulttabs/shared';
 import { z } from 'zod';
-import { Container } from '../container.js';
-import { authenticate } from '../middleware/auth.js';
+import { parseOrThrow } from '../errors.js';
+import { credential } from '../schemas.js';
+import { deviceName, idParam, type RouteDeps } from './common.js';
 
-export async function accountRoutes(fastify: FastifyInstance, options: { container: Container }) {
-  const { accountService, deviceService } = options.container;
+const RetentionBody = z.object({
+  retention: z
+    .number({ error: 'retention is required' })
+    .int()
+    .min(LIMITS.minRetention, `retention must be between ${LIMITS.minRetention} and ${LIMITS.maxRetention}`)
+    .max(LIMITS.maxRetention, `retention must be between ${LIMITS.minRetention} and ${LIMITS.maxRetention}`),
+});
+const RenameBody = z.object({ device_name: deviceName });
+const DeleteAccountBody = z.object({ current: credential });
 
-  fastify.get('/account', { preHandler: [authenticate] }, async (request, reply) => {
-    const { userId } = request.user;
-    try {
-      const info = await accountService.getAccountInfo(userId);
-      return reply.send(info);
-    } catch (err) {
-      return reply.status(404).send({ error: 'User not found' });
-    }
-  });
+export async function accountRoutes(fastify: FastifyInstance, { container, authenticate }: RouteDeps) {
+  const { accountService, authService, deviceService } = container;
 
-  fastify.patch('/account/retention', { preHandler: [authenticate] }, async (request, reply) => {
-    const { userId } = request.user;
-
-    const schema = z.object({
-      retention: z.number().int().min(0).max(500),
-    });
-
-    const parsed = schema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.status(400).send({
-        error: 'Validation failed',
-        message: 'retention must be an integer between 0 and 500 (0 = unlimited)',
-      });
-    }
-
-    const { retention } = parsed.data;
-    await accountService.updateRetention(userId, retention);
-
-    return reply.send({
-      message: `Retention updated to ${retention === 0 ? 'unlimited' : retention + ' snapshots per device'}`,
-      retention,
-    });
-  });
-
-  fastify.get('/account/devices', { preHandler: [authenticate] }, async (request, reply) => {
-    const { userId } = request.user;
-    const devices = await accountService.listDevicesWithStats(userId);
-    return reply.send({ devices });
-  });
-
-  fastify.patch<{ Params: { id: string } }>(
-    '/account/devices/:id', { preHandler: [authenticate] },
-    async (request, reply) => {
-      const { userId } = request.user;
-      const { id } = request.params;
-
-      const schema = z.object({
-        device_name: z.string().min(1).max(100).trim(),
-      });
-
-      const parsed = schema.safeParse(request.body);
-      if (!parsed.success) {
-        return reply.status(400).send({ error: 'device_name is required (max 100 chars)' });
-      }
-
-      try {
-        const updated = await deviceService.updateDeviceName(userId, id, parsed.data.device_name);
-        return reply.send({ message: 'Device renamed', device: updated });
-      } catch (err) {
-        return reply.status(404).send({ error: 'Device not found' });
-      }
-    }
+  fastify.get('/account', { preHandler: authenticate }, async request =>
+    accountService.info(request.user.userId),
   );
 
-  fastify.delete<{ Params: { id: string } }>(
-    '/account/devices/:id', { preHandler: [authenticate] },
-    async (request, reply) => {
-      const { userId } = request.user;
-      const { id } = request.params;
-
-      try {
-        await deviceService.deleteDevice(userId, id);
-        return reply.send({
-          message: 'Device and all its snapshots have been deleted.',
-        });
-      } catch (err) {
-        return reply.status(404).send({ error: 'Device not found' });
-      }
-    }
-  );
-
-  fastify.delete('/account', {
-    preHandler: [authenticate],
-    config: { rateLimit: { max: 3, timeWindow: '1 hour' } },
-  }, async (request, reply) => {
-    const { userId } = request.user;
-
-    const schema = z.object({
-      password: z.string().min(1, 'Password confirmation required'),
-    });
-
-    const parsed = schema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.status(400).send({ error: 'Password confirmation required' });
-    }
-
-    try {
-      await accountService.deleteAccount(userId, parsed.data.password);
-      return reply.send({
-        message: 'Account permanently deleted. All your data has been wiped from our servers.',
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'failed';
-      if (msg === 'Incorrect password') {
-        return reply.status(401).send({ error: 'Incorrect password. Account not deleted.' });
-      }
-      return reply.status(404).send({ error: msg });
-    }
+  fastify.patch('/account/retention', { preHandler: authenticate }, async request => {
+    const { retention } = parseOrThrow(RetentionBody, request.body);
+    await accountService.setRetention(request.user.userId, retention);
+    return { retention };
   });
 
+  fastify.get('/account/devices', { preHandler: authenticate }, async request => ({
+    devices: await accountService.devicesWithStats(request.user.userId),
+  }));
+
+  fastify.patch('/account/devices/:id', { preHandler: authenticate }, async request => {
+    const id = idParam(request.params, 'Device');
+    const body = parseOrThrow(RenameBody, request.body);
+    return { device: await deviceService.rename(request.user.userId, id, body.device_name) };
+  });
+
+  fastify.delete('/account/devices/:id', { preHandler: authenticate }, async request => {
+    await deviceService.remove(request.user.userId, idParam(request.params, 'Device'));
+    return { message: 'Device and its snapshots were deleted.' };
+  });
+
+  fastify.delete(
+    '/account',
+    { preHandler: authenticate, config: { rateLimit: { max: 5, timeWindow: '1 hour' } } },
+    async request => {
+      const body = parseOrThrow(DeleteAccountBody, request.body);
+      await authService.deleteAccount(request.user.userId, body.current);
+      return { message: 'Your account and all of its data were permanently deleted.' };
+    },
+  );
 }

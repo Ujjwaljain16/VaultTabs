@@ -10,7 +10,8 @@
 #
 # First-time setup:
 #   1. cp .env.example .env   and fill in POSTGRES_PASSWORD and JWT_SECRET (both are REQUIRED)
-#   2. docker compose up -d --build   (the backend applies DB migrations on start)
+#   2. docker compose up -d --build   (the backend applies DB migrations on start and runs the
+#      hourly maintenance job itself; there is no separate cleanup container)
 #
 # Production overrides:
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
@@ -20,25 +21,24 @@
 # before using it outside localhost; otherwise passwords and JWTs cross the network in clear text.
 
 services:
-
   # ── PostgreSQL ──────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: vaulttabs-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB:       vaulttabs
-      POSTGRES_USER:     vaulttabs
+      POSTGRES_DB: vaulttabs
+      POSTGRES_USER: vaulttabs
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - set it in .env (see .env.example)}
     ports:
       # Loopback only. Remove this mapping entirely if you do not need host access to the DB.
-      - "127.0.0.1:5432:5432"
+      - '127.0.0.1:5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Run init SQL on first startup
       - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vaulttabs -d vaulttabs"]
+      test: ['CMD-SHELL', 'pg_isready -U vaulttabs -d vaulttabs']
       interval: 5s
       timeout: 3s
       retries: 10
@@ -55,27 +55,32 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      NODE_ENV:     production
-      PORT:         3000
-      # TLS is expected to be terminated by a reverse proxy in front of the container.
-      HTTPS_ENABLED: "false"
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       # Postgres is on the private compose network, so TLS to it is disabled here.
       DATABASE_SSL: disable
       DATABASE_URL: postgres://vaulttabs:${POSTGRES_PASSWORD}@postgres:5432/vaulttabs
-      JWT_SECRET:   "${JWT_SECRET:?JWT_SECRET is required - run: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"}"
-      JWT_EXPIRY:   ${JWT_EXPIRY:-30d}
+      JWT_SECRET: '${JWT_SECRET:?JWT_SECRET is required - run: node -e "console.log(require(''crypto'').randomBytes(32).toString(''hex''))"}'
+      JWT_EXPIRY: ${JWT_EXPIRY:-30d}
+      # Optional; derived from JWT_SECRET when empty.
+      PRELOGIN_SECRET: ${PRELOGIN_SECRET:-}
       # Origins allowed by CORS. Add your extension origin (chrome-extension://<id>) if needed.
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3001}
       # Set to "true" only when running behind a reverse proxy that sets X-Forwarded-For.
-      TRUST_PROXY:  ${TRUST_PROXY:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      MAX_DEVICES_PER_USER: ${MAX_DEVICES_PER_USER:-25}
+      # Database maintenance runs inside the backend (advisory-locked; safe with several replicas).
+      CLEANUP_INTERVAL_MINUTES: ${CLEANUP_INTERVAL_MINUTES:-60}
     ports:
-      - "3000:3000"
+      - '3000:3000'
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3000/ready > /dev/null || exit 1']
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 20s
 
   # ── PWA (Next.js) ───────────────────────────────────────────────────────────
   pwa:
@@ -94,30 +99,13 @@ services:
     environment:
       NODE_ENV: production
     ports:
-      - "3001:3001"
+      - '3001:3001'
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3001 || exit 1"]
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3001 || exit 1']
       interval: 15s
       timeout: 5s
       retries: 5
       start_period: 30s
-
-  # ── Cleanup job (runs every hour) ──────────────────────────────────────────
-  # Expires old restore_requests and enforces snapshot retention limits.
-  # Uses the same backend image - just runs a different command.
-  cleanup:
-    build:
-      context: .
-      dockerfile: backend/dockerfile
-    container_name: vaulttabs-cleanup
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      DATABASE_SSL: disable
-      DATABASE_URL: postgres://vaulttabs:${POSTGRES_PASSWORD}@postgres:5432/vaulttabs
-    command: ["sh", "-c", "while true; do node dist/db/cleanup.js; sleep 3600; done"]
 
 volumes:
   postgres_data:

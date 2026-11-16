@@ -1,88 +1,65 @@
-import { IRestoreService } from '../interfaces/restore.service.js';
-import { IRestoreRepository } from '../interfaces/restore.repository.js';
-import { IDeviceRepository } from '../interfaces/device.repository.js';
-import { ISnapshotRepository } from '../interfaces/snapshot.repository.js';
-import { RestoreRequest } from '../interfaces/models.js';
-import { EventEmitter } from 'events';
+import type {
+  CreateRestoreResponse,
+  PendingRestoreResponse,
+  RestoreErrorCode,
+  RestoreRequest,
+} from '@vaulttabs/shared';
+import { conflict, notFound } from '../errors.js';
+import type { RestoreContent, RestoreRepository } from '../repositories/restore.repository.js';
+import type { SnapshotRepository } from '../repositories/snapshot.repository.js';
+import type { DeviceService } from './device.service.js';
 
-export class RestoreService implements IRestoreService {
-    public events: EventEmitter;
+export class RestoreService {
+  constructor(
+    private readonly restores: RestoreRepository,
+    private readonly snapshots: SnapshotRepository,
+    private readonly devices: DeviceService,
+  ) {}
 
-    constructor(
-        private restoreRepository: IRestoreRepository,
-        private snapshotRepository: ISnapshotRepository,
-        private deviceRepository: IDeviceRepository
-    ) {
-        this.events = new EventEmitter();
-        this.events.setMaxListeners(100);
+  async create(
+    userId: string,
+    targetDeviceId: string,
+    content: RestoreContent,
+  ): Promise<CreateRestoreResponse> {
+    await this.devices.assertOwned(userId, targetDeviceId);
+    if ('snapshotId' in content && !(await this.snapshots.findOwned(userId, content.snapshotId))) {
+      throw notFound('Snapshot not found', 'snapshot_not_found');
     }
+    const request = await this.restores.create(userId, targetDeviceId, content);
+    return { request_id: request.id, status: request.status, expires_at: request.expires_at };
+  }
 
-    async createRequest(userId: string, targetDeviceId: string, snapshotId?: string, sourceDeviceId?: string, targetUrl?: string): Promise<RestoreRequest> {
-        // 0. The target device must belong to the caller
-        const targetDevice = await this.deviceRepository.findByDeviceId(targetDeviceId);
-        if (!targetDevice || targetDevice.user_id !== userId) {
-            throw new Error('Target device not found');
-        }
+  /** Current pending request for one of the caller's devices (404 if the device is not theirs). */
+  async pending(userId: string, deviceId: string): Promise<PendingRestoreResponse> {
+    await this.devices.assertOwned(userId, deviceId);
+    return this.pendingUnchecked(userId, deviceId);
+  }
 
-        // 1. Get snapshot (latest if not specified)
-        let snapshot;
-        if (snapshotId) {
-            snapshot = await this.snapshotRepository.findById(snapshotId);
-        } else {
-            snapshot = await this.snapshotRepository.findByDeviceId(targetDeviceId);
-        }
+  /** As `pending`, for callers that already verified device ownership (the SSE stream). */
+  async pendingUnchecked(userId: string, deviceId: string): Promise<PendingRestoreResponse> {
+    const request = await this.restores.findPendingDetail(userId, deviceId);
+    return request ? { pending: true, request } : { pending: false };
+  }
 
-        if (!snapshot || snapshot.user_id !== userId) {
-            throw new Error('No snapshots found');
-        }
+  async complete(
+    userId: string,
+    id: string,
+    status: 'completed' | 'failed',
+    errorCode: RestoreErrorCode | null,
+  ): Promise<void> {
+    const result = await this.restores.complete(
+      userId,
+      id,
+      status,
+      status === 'failed' ? (errorCode ?? 'unknown') : null,
+    );
+    if (result === 'not_found') throw notFound('Restore request not found', 'restore_not_found');
+    if (result === 'not_pending') throw conflict('This restore request is no longer pending.', 'not_pending');
+  }
 
-        // 2. Expire old requests
-        await this.restoreRepository.expireExistingPending(targetDeviceId);
-
-        // 3. Create request
-        const expiresAt = new Date();
-        expiresAt.setMinutes(expiresAt.getMinutes() + 5);
-
-        const request = await this.restoreRepository.create({
-            user_id: userId,
-            source_device_id: snapshot.device_id, // The device that captured the snapshot
-            target_device_id: targetDeviceId,     // The device receiving the restore
-            snapshot_id: snapshot.id,
-            target_url: targetUrl,
-            expires_at: expiresAt,
-        });
-
-        // Emit an event to any connected SSE listeners for this specific device
-        this.events.emit(`restore:${targetDeviceId}`, request);
-
-        return request;
-    }
-
-    async getPendingWithSnapshot(userId: string, targetDeviceId: string): Promise<any | undefined> {
-        return this.restoreRepository.findPendingByTargetDeviceWithSnapshot(userId, targetDeviceId);
-    }
-
-    async getPendingRequest(userId: string, targetDeviceId: string): Promise<RestoreRequest | undefined> {
-        const request = await this.restoreRepository.findPendingByTargetDevice(targetDeviceId);
-        if (!request) return undefined;
-
-        // Check ownership (optional but good)
-        return request;
-    }
-
-    async completeRequest(userId: string, requestId: string, status: 'completed' | 'failed', errorMsg?: string): Promise<void> {
-        const request = await this.restoreRepository.findById(requestId);
-        if (!request || request.user_id !== userId) {
-            throw new Error('Restore request not found');
-        }
-        await this.restoreRepository.updateStatus(requestId, status, errorMsg);
-    }
-
-    async getRequestStatus(userId: string, requestId: string): Promise<RestoreRequest> {
-        const request = await this.restoreRepository.findById(requestId);
-        if (!request || request.user_id !== userId) {
-            throw new Error('Restore request not found');
-        }
-        return request;
-    }
+  async get(userId: string, id: string): Promise<RestoreRequest> {
+    const request = await this.restores.findOwned(userId, id);
+    if (!request) throw notFound('Restore request not found', 'restore_not_found');
+    return request;
+  }
 }

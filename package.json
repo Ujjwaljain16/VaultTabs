@@ -1,10 +1,37 @@
 {
-    "name": "vaulttabs-workspace",
-    "private": true,
-    "workspaces": [
-        "backend",
-        "extension",
-        "pwa",
-        "shared"
-    ]
+  "name": "vaulttabs-workspace",
+  "private": true,
+  "description": "VaultTabs: cross-browser tab sync with end-to-end encrypted snapshots",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "workspaces": [
+    "shared",
+    "backend",
+    "extension",
+    "pwa"
+  ],
+  "scripts": {
+    "build:shared": "npm run build --workspace=shared",
+    "build": "npm run build:shared && npm run build --workspace=backend && npm run build --workspace=pwa && npm run build --workspace=extension",
+    "typecheck": "npm run build:shared && npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "npm run build:shared && vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@next/eslint-plugin-next": "^16.4.6",
+    "eslint": "^9.39.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^16.5.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.0",
+    "vitest": "^4.1.12"
+  }
 }

@@ -1,277 +1,338 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VaultTabs</title>
-  <link rel="stylesheet" href="style.css" />
-</head>
-<body>
-  <div id="app">
-
-    <!-- ── LOADING ─────────────────────────────────────────── -->
-    <div id="screen-loading" class="screen">
-      <div class="spinner"></div>
-      <p>Loading...</p>
-    </div>
-
-    <!-- ── AUTH (register / login) ────────────────────────── -->
-    <div id="screen-auth" class="screen hidden">
-      <div class="logo">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-          <path d="m9 12 2 2 4-4"/>
-        </svg>
-        <span>VaultTabs</span>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VaultTabs</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Loading -->
+      <div id="screen-loading" class="screen">
+        <div class="spinner"></div>
+        <p>Loading...</p>
       </div>
 
-      <div class="tab-toggle">
-        <button id="btn-show-register" class="tab-btn active">Register</button>
-        <button id="btn-show-login" class="tab-btn">Login</button>
+      <!-- Register / login -->
+      <div id="screen-auth" class="screen hidden">
+        <div class="logo">
+          <svg class="logo-mark" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            <path d="m9 12 2 2 4-4" />
+          </svg>
+          <span>VaultTabs</span>
+        </div>
+
+        <div class="tab-toggle" role="tablist">
+          <button type="button" id="btn-show-login" class="tab-btn active" role="tab">Login</button>
+          <button type="button" id="btn-show-register" class="tab-btn" role="tab">Register</button>
+        </div>
+
+        <form id="form-login" class="auth-form" novalidate>
+          <div class="field">
+            <label for="login-email">Email Address</label>
+            <input
+              type="email"
+              id="login-email"
+              autocomplete="username"
+              placeholder="you@example.com"
+              required
+            />
+          </div>
+          <div class="field">
+            <label for="login-password">Master Password</label>
+            <input
+              type="password"
+              id="login-password"
+              autocomplete="current-password"
+              placeholder="Your password"
+              required
+            />
+          </div>
+          <div class="field">
+            <label for="login-device-name">Device Name (optional)</label>
+            <input type="text" id="login-device-name" maxlength="100" placeholder="e.g. Work Laptop" />
+          </div>
+          <div id="login-error" class="error-msg hidden" role="alert"></div>
+          <button type="submit" id="btn-login" class="btn-primary">
+            <span class="btn-text">Unlock Vault</span>
+            <span class="btn-loading hidden">Deriving keys...</span>
+          </button>
+        </form>
+
+        <form id="form-register" class="auth-form hidden" novalidate>
+          <div class="field">
+            <label for="reg-email">Email Address</label>
+            <input
+              type="email"
+              id="reg-email"
+              autocomplete="username"
+              placeholder="you@example.com"
+              required
+            />
+          </div>
+          <div class="field">
+            <label for="reg-password">Master Password</label>
+            <input type="password" id="reg-password" autocomplete="new-password" required />
+            <div class="strength" id="reg-strength" aria-live="polite">
+              <div class="strength-bar"><span id="reg-strength-fill"></span></div>
+              <span id="reg-strength-label" class="strength-label"></span>
+            </div>
+          </div>
+          <div class="field">
+            <label for="reg-password-confirm">Confirm Password</label>
+            <input
+              type="password"
+              id="reg-password-confirm"
+              autocomplete="new-password"
+              placeholder="Repeat password"
+              required
+            />
+          </div>
+          <div class="field">
+            <label for="reg-device-name">Device Name</label>
+            <input type="text" id="reg-device-name" maxlength="100" placeholder="e.g. Home PC" />
+          </div>
+          <div id="reg-error" class="error-msg hidden" role="alert"></div>
+          <button type="submit" id="btn-register" class="btn-primary">
+            <span class="btn-text">Create Vault</span>
+            <span class="btn-loading hidden">Generating keys...</span>
+          </button>
+          <p class="hint">
+            Your password never leaves this device. Tabs are encrypted here before upload. If you forget the
+            password, only your recovery key can unlock your data.
+          </p>
+        </form>
       </div>
 
-      <!-- Register -->
-      <form id="form-register" class="auth-form">
-        <div class="field">
-          <label for="reg-email">Email Address</label>
-          <input type="email" id="reg-email" placeholder="you@example.com" required />
+      <!-- Recovery key (shown once after registration) -->
+      <div id="screen-recovery" class="screen hidden">
+        <div class="logo">
+          <svg class="logo-mark" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            <path d="m9 12 2 2 4-4" />
+          </svg>
+          <span>VaultTabs</span>
         </div>
-        <div class="field">
-          <label for="reg-password">Master Password</label>
-          <input type="password" id="reg-password" placeholder="Min 8 characters" required minlength="8" />
+        <div class="recovery-box">
+          <p class="recovery-title">EMERGENCY ACCESS KEY</p>
+          <p class="recovery-desc">
+            This key is the <strong>only way</strong> to recover your vault if you lose your password.
+          </p>
+          <div class="recovery-code-block">
+            <div class="recovery-code" id="recovery-code-text"></div>
+            <button type="button" class="recovery-copy-btn" id="btn-copy-recovery">COPY</button>
+          </div>
+          <button type="button" class="recovery-download-btn" id="btn-download-recovery">
+            DOWNLOAD RECOVERY.TXT
+          </button>
+          <div class="recovery-warning">
+            THE SERVER NEVER SEES THIS CODE. IF YOU LOSE BOTH IT AND YOUR PASSWORD, YOUR DATA CANNOT BE
+            DECRYPTED.
+          </div>
+          <div id="recovery-session-error" class="error-msg hidden" role="alert"></div>
+          <label class="recovery-confirm-label">
+            <input type="checkbox" id="recovery-saved-check" />
+            <span>I have securely stored my recovery key.</span>
+          </label>
+          <button type="button" id="btn-recovery-continue" class="btn-primary" disabled>ENTER VAULT →</button>
         </div>
-        <div class="field">
-          <label for="reg-device-name">Device Name</label>
-          <input type="text" id="reg-device-name" placeholder="e.g. Home PC" />
-        </div>
-        <div class="field">
-          <label for="reg-password-confirm">Confirm Password</label>
-          <input type="password" id="reg-password-confirm" placeholder="Repeat password" required />
-        </div>
-        <div id="reg-error" class="error-msg hidden"></div>
-        <button type="submit" id="btn-register" class="btn-primary">
-          <span class="btn-text">Create Vault</span>
-          <span class="btn-loading hidden">Initializing...</span>
-        </button>
-        <p class="hint">Tabs are encrypted on this device before upload. Your password is also sent to the server over HTTPS to sign you in, so use a unique one.</p>
-      </form>
-
-      <!-- Login -->
-      <form id="form-login" class="auth-form hidden">
-        <div class="field">
-          <label for="login-email">Email Address</label>
-          <input type="email" id="login-email" placeholder="you@example.com" required />
-        </div>
-        <div class="field">
-          <label for="login-password">Master Password</label>
-          <input type="password" id="login-password" placeholder="Your password" required />
-        </div>
-        <div class="field">
-          <label for="login-device-name">Device Name (Optional)</label>
-          <input type="text" id="login-device-name" placeholder="e.g. Work Laptop" />
-        </div>
-        <div id="login-error" class="error-msg hidden"></div>
-        <button type="submit" id="btn-login" class="btn-primary">
-          <span class="btn-text">Unlock Vault</span>
-          <span class="btn-loading hidden">Decrypting...</span>
-        </button>
-      </form>
-    </div>
-
-    <!-- ── DASHBOARD ───────────────────────────────────────── -->
-    <div id="screen-dashboard" class="screen hidden">
-
-      <!-- Header -->
-      <div class="logo">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-          <path d="m9 12 2 2 4-4"/>
-        </svg>
-        <span>VaultTabs</span>
-        <button id="btn-logout" class="btn-icon" title="Logout">LOGOUT</button>
       </div>
 
-      <!-- Sync status bar -->
-      <div class="status-card" id="status-card">
-        <div class="status-row">
-          <span class="status-dot" id="status-dot"></span>
-          <span id="status-text">Syncing...</span>
-          <span class="sync-count" id="sync-count"></span>
+      <!-- Re-login (session ended or key missing) -->
+      <div id="screen-relogin" class="screen hidden">
+        <div class="logo">
+          <svg class="logo-mark" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            <path d="m9 12 2 2 4-4" />
+          </svg>
+          <span>VaultTabs</span>
         </div>
-        <div class="status-detail" id="status-detail">Waiting for pulse...</div>
+        <div class="relogin-box">
+          <p class="relogin-title">Vault Locked</p>
+          <p class="relogin-desc" id="relogin-desc"></p>
+          <p class="relogin-email" id="relogin-email-display"></p>
+          <form id="form-relogin" class="auth-form" novalidate>
+            <div class="field">
+              <label for="relogin-password">Master Password</label>
+              <input type="password" id="relogin-password" autocomplete="current-password" required />
+            </div>
+            <div id="relogin-error" class="error-msg hidden" role="alert"></div>
+            <button type="submit" id="btn-relogin" class="btn-primary">
+              <span class="btn-text">Unlock</span>
+              <span class="btn-loading hidden">Deriving keys...</span>
+            </button>
+          </form>
+          <button type="button" id="btn-relogin-switch" class="btn-link">Use a different account</button>
+        </div>
       </div>
 
-      <!-- Error banner -->
-      <div id="error-banner" class="error-banner hidden">
-        <span id="error-banner-text"></span>
-      </div>
+      <!-- Main (logged in) -->
+      <div id="screen-main" class="screen hidden">
+        <div class="logo">
+          <svg class="logo-mark logo-mark-sm" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            <path d="m9 12 2 2 4-4" />
+          </svg>
+          <span>VaultTabs</span>
+        </div>
 
-      <!-- Stats row -->
-      <div class="stats-row">
-        <div class="stat-box">
-          <div class="stat-value" id="info-tab-count">—</div>
-          <div class="stat-label">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 2px; margin-top: -2px;">
-              <path d="M2 3h10v10H2z"/><path d="m22 3-5 5"/><path d="m17 3 5 5"/>
-            </svg>
-            Tabs
+        <div class="tab-toggle" role="tablist">
+          <button type="button" class="tab-btn nav-btn active" data-view="view-tabs" role="tab">Tabs</button>
+          <button type="button" class="tab-btn nav-btn" data-view="view-devices" role="tab">Devices</button>
+          <button type="button" class="tab-btn nav-btn" data-view="view-settings" role="tab">Settings</button>
+        </div>
+
+        <!-- This browser -->
+        <div id="view-tabs" class="view">
+          <div class="status-card">
+            <div class="status-row">
+              <span class="status-dot" id="status-dot"></span>
+              <span id="status-text">Checking...</span>
+              <span class="sync-count hidden" id="sync-count"></span>
+              <button type="button" id="btn-sync-now" class="btn-chip">Sync now</button>
+            </div>
+            <div class="status-detail" id="status-detail"></div>
+          </div>
+
+          <div id="error-banner" class="error-banner hidden" role="alert"></div>
+
+          <div class="stats-row">
+            <div class="stat-box">
+              <div class="stat-value" id="info-tab-count">—</div>
+              <div class="stat-label">Tabs</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-value" id="info-window-count">—</div>
+              <div class="stat-label">Windows</div>
+            </div>
+            <button
+              type="button"
+              class="stat-box stat-button"
+              id="stat-device-box"
+              title="Rename this device"
+            >
+              <div class="stat-value stat-value-text" id="info-device">—</div>
+              <div class="stat-label">Host <span class="edit-icon">✎</span></div>
+            </button>
+          </div>
+
+          <div class="section-header">
+            <span>Active Session</span>
+            <button
+              type="button"
+              id="btn-send-window"
+              class="btn-chip"
+              title="Send all tabs of this window to another device"
+            >
+              Send window
+            </button>
+          </div>
+          <div id="tab-list" class="tab-list"></div>
+        </div>
+
+        <!-- Other devices -->
+        <div id="view-devices" class="view hidden">
+          <div class="search-row">
+            <input
+              type="search"
+              id="device-search"
+              placeholder="Search tabs on all devices"
+              autocomplete="off"
+            />
+            <button type="button" id="btn-refresh-devices" class="btn-chip" title="Reload">↻</button>
+          </div>
+          <div id="devices-status" class="tab-list-empty hidden"></div>
+          <div id="device-list" class="device-list"></div>
+        </div>
+
+        <!-- Settings -->
+        <div id="view-settings" class="view hidden">
+          <div class="settings-card">
+            <label class="toggle-row" for="setting-pause">
+              <span>
+                <span class="settings-title">Pause syncing</span>
+                <span class="settings-desc"
+                  >Stop uploading this browser's tabs. Receiving tabs keeps working.</span
+                >
+              </span>
+              <input type="checkbox" id="setting-pause" class="toggle" />
+            </label>
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-title">Never sync these domains</div>
+            <div class="settings-desc">
+              Tabs on a domain or any of its subdomains are left out of snapshots.
+            </div>
+            <form id="form-domain" class="inline-form" novalidate>
+              <input
+                type="text"
+                id="domain-input"
+                placeholder="bank.com"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button type="submit" class="btn-chip">Add</button>
+            </form>
+            <div id="domain-error" class="error-msg hidden" role="alert"></div>
+            <ul id="domain-list" class="domain-list"></ul>
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-title">Account</div>
+            <div class="settings-desc" id="settings-email"></div>
+            <div class="settings-actions">
+              <button type="button" id="btn-open-dashboard" class="btn-secondary hidden">
+                Open web dashboard
+              </button>
+              <button type="button" id="btn-logout" class="btn-secondary btn-danger">Log out</button>
+            </div>
           </div>
         </div>
-        <div class="stat-box">
-          <div class="stat-value" id="info-window-count">—</div>
-          <div class="stat-label">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 2px; margin-top: -2px;">
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-              <line x1="3" y1="9" x2="21" y2="9"/>
-            </svg>
-            Windows
-          </div>
-        </div>
-        <div class="stat-box" id="stat-device-box" title="Click to rename device">
-          <div class="stat-value" id="info-device">—</div>
-          <div class="stat-label">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 2px; margin-top: -2px;">
-              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
-              <line x1="8" y1="21" x2="16" y2="21"/>
-              <line x1="12" y1="17" x2="12" y2="21"/>
-            </svg>
-            Host <span class="edit-icon">✎</span>
-          </div>
+
+        <div class="footer-row">
+          <span id="user-email-display" class="user-email"></span>
+          <span class="enc-badge">Encrypted</span>
         </div>
       </div>
 
       <!-- Rename device -->
       <div id="rename-overlay" class="overlay hidden">
-        <div class="overlay-content">
+        <form class="overlay-content" id="form-rename" novalidate>
           <p class="overlay-title">Rename Host</p>
-          <input type="text" id="rename-input" placeholder="e.g. Work PC" />
-          <div id="rename-error" class="error-msg hidden"></div>
+          <input type="text" id="rename-input" maxlength="100" placeholder="e.g. Work PC" />
+          <div id="rename-error" class="error-msg hidden" role="alert"></div>
           <div class="overlay-buttons">
-            <button id="btn-cancel-rename" class="btn-secondary">Cancel</button>
-            <button id="btn-save-rename" class="btn-primary">Save</button>
+            <button type="button" id="btn-cancel-rename" class="btn-secondary">Cancel</button>
+            <button type="submit" id="btn-save-rename" class="btn-primary btn-inline">
+              <span class="btn-text">Save</span>
+              <span class="btn-loading hidden">Saving...</span>
+            </button>
           </div>
-        </div>
-      </div>
-
-      <!-- Recent tabs preview -->
-      <div class="section-header">
-        <span>Active Session</span>
-        <span class="section-hint" id="tabs-hint"></span>
-      </div>
-      <div id="tab-list" class="tab-list">
-        <div class="tab-list-empty">Scanning for tabs...</div>
-      </div>
-
-      <!-- Footer -->
-      <div class="footer-row">
-        <span id="user-email-display" class="user-email"></span>
-        <span class="enc-badge">
-          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 3px; margin-top: -1px;">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-          </svg>
-          Encrypted
-        </span>
-      </div>
-
-      <!-- Restore toast -->
-      <div id="restore-toast" class="restore-toast hidden">
-        <span id="restore-toast-text">✓ Session restored!</span>
-      </div>
-
-      <!-- Device picker for "Send to Device" -->
-      <div id="device-picker-overlay" class="overlay hidden">
-        <div class="overlay-content">
-          <p class="overlay-title">Send Tab To...</p>
-          <p class="overlay-desc">Select a device to open this tab on:</p>
-          <div id="device-picker-list" class="device-picker-list">
-            <!-- Populated via JS -->
-          </div>
-          <button id="btn-cancel-device-picker" class="btn-secondary">Cancel</button>
-        </div>
-      </div>
-
-      <!-- Restore status overlay (PWA-style) -->
-      <div id="restore-overlay" class="overlay hidden">
-        <div class="overlay-content">
-          <div id="restore-status-content">
-            <!-- Content changes based on state -->
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── RECOVERY KEY ──────────────────────────────────────── -->
-    <div id="screen-recovery" class="screen hidden">
-      <div class="logo">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-          <path d="m9 12 2 2 4-4"/>
-        </svg>
-        <span>VaultTabs</span>
-      </div>
-
-      <div class="recovery-box">
-        <p class="recovery-title">EMERGENCY ACCESS KEY</p>
-        <p class="recovery-desc">
-          This key is the <strong>only way</strong> to recover your vault if you lose your password.
-        </p>
-
-        <div class="recovery-code-block">
-          <div class="recovery-code" id="recovery-code-text">VAULT-XXXX-XXXX-XXXX</div>
-          <button class="recovery-copy-btn" id="btn-copy-recovery">COPY</button>
-        </div>
-
-        <button class="recovery-download-btn" id="btn-download-recovery">
-          DOWNLOAD RECOVERY.TXT
-        </button>
-
-        <div class="recovery-warning">
-          THE SERVER DOES NOT STORE THIS CODE IN READABLE FORM.
-          IF YOU LOSE BOTH IT AND YOUR PASSWORD, YOUR DATA CANNOT BE DECRYPTED.
-        </div>
-
-        <label class="recovery-confirm-label">
-          <input type="checkbox" id="recovery-saved-check" />
-          <span>I have securely stored my recovery key.</span>
-        </label>
-
-        <button id="btn-recovery-continue" class="btn-primary" disabled>
-          ENTER VAULT →
-        </button>
-      </div>
-    </div>
-
-    <!-- ── RE-LOGIN PROMPT ─────────────────────────────────── -->
-    <div id="screen-relogin" class="screen hidden">
-      <div class="logo">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-          <path d="m9 12 2 2 4-4"/>
-        </svg>
-        <span>VaultTabs</span>
-      </div>
-      <div class="relogin-box">
-        <p class="relogin-title">Vault Locked</p>
-        <p class="relogin-desc">Your session has timed out. Please enter your master password to unlock your vault.</p>
-        <form id="form-relogin" class="auth-form">
-          <div class="field" style="display:none;">
-            <label for="relogin-email">Email</label>
-            <input type="email" id="relogin-email" required />
-          </div>
-          <div class="field">
-            <label for="relogin-password">Master Password</label>
-            <input type="password" id="relogin-password" placeholder="••••••••" required />
-          </div>
-          <div id="relogin-error" class="error-msg hidden"></div>
-          <button type="submit" id="btn-relogin" class="btn-primary">
-            <span class="btn-text">Unlock</span>
-            <span class="btn-loading hidden">Decrypting...</span>
-          </button>
         </form>
       </div>
-    </div>
 
-  </div>
-  <script type="module" src="main.ts"></script>
-</body>
+      <!-- Device picker -->
+      <div id="device-picker-overlay" class="overlay hidden">
+        <div class="overlay-content">
+          <p class="overlay-title">Send To...</p>
+          <p class="overlay-desc" id="device-picker-desc"></p>
+          <div id="device-picker-list" class="device-picker-list"></div>
+          <button type="button" id="btn-cancel-device-picker" class="btn-secondary btn-block">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Send status -->
+      <div id="restore-overlay" class="overlay hidden">
+        <div class="overlay-content">
+          <div id="restore-status-content"></div>
+        </div>
+      </div>
+
+      <div id="toast" class="restore-toast hidden" role="status"></div>
+    </div>
+    <script type="module" src="main.ts"></script>
+  </body>
 </html>

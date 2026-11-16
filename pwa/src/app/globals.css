@@ -4,47 +4,53 @@
    Feels like a secure ops dashboard. Dense, precise, trustworthy.
    ═══════════════════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+/* Fonts are self-hosted via next/font (see layout.tsx): no requests to Google at runtime. */
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
 :root {
   /* Core palette */
-  --black:        #080808;
-  --black-2:      #0f0f0f;
-  --black-3:      #161616;
-  --black-4:      #1e1e1e;
-  --black-5:      #242424;
+  --black: #080808;
+  --black-2: #0f0f0f;
+  --black-3: #161616;
+  --black-4: #1e1e1e;
+  --black-5: #242424;
 
   /* Phosphor green — the signature color */
-  --green:        #39ff85;
-  --green-dim:    #22c55e;
-  --green-muted:  rgba(57, 255, 133, 0.12);
+  --green: #39ff85;
+  --green-dim: #22c55e;
+  --green-muted: rgba(57, 255, 133, 0.12);
   --green-border: rgba(57, 255, 133, 0.18);
-  --green-glow:   0 0 20px rgba(57, 255, 133, 0.15);
+  --green-glow: 0 0 20px rgba(57, 255, 133, 0.15);
 
   /* Text */
-  --text:         #e2e8e4;
-  --text-2:       #9aab9e;
-  --text-3:       #566059;
+  --text: #e2e8e4;
+  --text-2: #9aab9e;
+  --text-3: #6f7c72;
 
   /* Semantic */
-  --error:        #ff5e5e;
-  --error-dim:    rgba(255, 94, 94, 0.1);
-  --warn:         #ffb347;
+  --error: #ff5e5e;
+  --error-dim: rgba(255, 94, 94, 0.1);
+  --warn: #ffb347;
 
   /* Borders */
-  --border:       #1e2420;
-  --border-2:     #252e28;
+  --border: #1e2420;
+  --border-2: #252e28;
 
   /* Radius */
-  --r:            10px;
-  --r-sm:         6px;
-  --r-lg:         16px;
+  --r: 10px;
+  --r-sm: 6px;
+  --r-lg: 16px;
 
   /* Fonts */
-  --font-mono:    'JetBrains Mono', 'Courier New', monospace;
-  --font-sans:    'DM Sans', system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), 'JetBrains Mono', ui-monospace, 'Courier New', monospace;
+  --font-sans: var(--font-dm-sans), 'DM Sans', system-ui, sans-serif;
 }
 
 html {
@@ -72,50 +78,125 @@ body {
 }
 
 /* ── SCROLLBARS ─────────────────────────────────── */
-::-webkit-scrollbar { width: 3px; height: 3px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--black-5); border-radius: 2px; }
+::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--black-5);
+  border-radius: 2px;
+}
 
 /* ── SELECTION ──────────────────────────────────── */
-::selection { background: var(--green-muted); color: var(--green); }
+::selection {
+  background: var(--green-muted);
+  color: var(--green);
+}
 
 /* ── FOCUS ──────────────────────────────────────── */
-:focus-visible { outline: 1px solid var(--green); outline-offset: 2px; }
+:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
 
 /* ── TYPOGRAPHY UTILITIES ───────────────────────── */
-.mono  { font-family: var(--font-mono); }
-.sans  { font-family: var(--font-sans); }
-.green { color: var(--green); }
-.muted { color: var(--text-2); }
-.dim   { color: var(--text-3); }
+.mono {
+  font-family: var(--font-mono);
+}
+.sans {
+  font-family: var(--font-sans);
+}
+.green {
+  color: var(--green);
+}
+.muted {
+  color: var(--text-2);
+}
+.dim {
+  color: var(--text-3);
+}
 
 /* ── ANIMATIONS ─────────────────────────────────── */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes pulse-green {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.3; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
 
 @keyframes scan {
-  0%   { transform: translateY(-100%); }
-  100% { transform: translateY(100vh); }
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100vh);
+  }
 }
 
 @keyframes blink {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
 
-.fade-in { animation: fadeIn 0.3s ease forwards; }
+.fade-in {
+  animation: fadeIn 0.3s ease forwards;
+}
 
 /* Staggered children */
-.stagger > *:nth-child(1) { animation-delay: 0ms; }
-.stagger > *:nth-child(2) { animation-delay: 60ms; }
-.stagger > *:nth-child(3) { animation-delay: 120ms; }
-.stagger > *:nth-child(4) { animation-delay: 180ms; }
-.stagger > *:nth-child(5) { animation-delay: 240ms; }
-.stagger > *:nth-child(n+6) { animation-delay: 300ms; }
+.stagger > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+.stagger > *:nth-child(2) {
+  animation-delay: 60ms;
+}
+.stagger > *:nth-child(3) {
+  animation-delay: 120ms;
+}
+.stagger > *:nth-child(4) {
+  animation-delay: 180ms;
+}
+.stagger > *:nth-child(5) {
+  animation-delay: 240ms;
+}
+.stagger > *:nth-child(n + 6) {
+  animation-delay: 300ms;
+}

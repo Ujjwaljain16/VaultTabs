@@ -1,22 +1,30 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { loadSession, loadMasterKey } from '@/lib/storage';
+import { EXTENSION_DOWNLOAD_URL, REPO_URL, SECURITY_MODEL_URL } from '@/lib/config';
+import { getSession } from '@/lib/session';
 import styles from './landing.module.css';
+
+function openExternal(url: string) {
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
 
 // Hook for scroll animations
 function useScrollReveal(isReady: boolean) {
   useEffect(() => {
     if (!isReady) return;
 
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add(styles.revealed);
-        }
-      });
-    }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+    const observer = new IntersectionObserver(
+      entries => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add(styles.revealed);
+          }
+        });
+      },
+      { threshold: 0.1, rootMargin: '0px 0px -50px 0px' },
+    );
 
     // Use setTimeout to ensure React has painted the DOM
     const timeoutId = setTimeout(() => {
@@ -32,28 +40,14 @@ function useScrollReveal(isReady: boolean) {
 
 export default function RootPage() {
   const router = useRouter();
-  const [isReady, setIsReady] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-  useScrollReveal(isReady);
+  useScrollReveal(true);
 
   useEffect(() => {
-    async function check() {
-      const session = loadSession();
-      const masterKey = await loadMasterKey();
-      if (session && masterKey) setIsLoggedIn(true);
-      setIsReady(true);
-    }
-    check();
+    // A stored session is enough to offer "Dashboard"; the dashboard asks to unlock if needed.
+    setIsLoggedIn(getSession() !== null);
   }, []);
-
-  if (!isReady) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100dvh', background: 'var(--black)' }}>
-        <div className={styles.spinner}></div>
-      </div>
-    );
-  }
 
   return (
     <div className={styles.layout}>
@@ -61,20 +55,37 @@ export default function RootPage() {
       <nav className={styles.navbar}>
         <div className={styles.logo}>
           <div className={styles.logoIcon}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
             </svg>
           </div>
           VaultTabs
         </div>
         <div className={styles.navLinks}>
-          <button className={styles.navBtn} onClick={() => window.open('https://github.com/Ujjwaljain16/VaultTabs', '_blank')}>Source Code</button>
+          <button className={styles.navBtn} onClick={() => openExternal(REPO_URL)}>
+            Source Code
+          </button>
           {isLoggedIn ? (
-            <button className={styles.navBtnPrimary} onClick={() => router.push('/dashboard')}>Dashboard</button>
+            <button className={styles.navBtnPrimary} onClick={() => router.push('/dashboard')}>
+              Dashboard
+            </button>
           ) : (
             <>
-              <button className={styles.navBtn} onClick={() => router.push('/login')}>Login</button>
-              <button className={styles.navBtnPrimary} onClick={() => router.push('/register')}>Register</button>
+              <button className={styles.navBtn} onClick={() => router.push('/login')}>
+                Login
+              </button>
+              <button className={styles.navBtnPrimary} onClick={() => router.push('/register')}>
+                Register
+              </button>
             </>
           )}
         </div>
@@ -87,29 +98,42 @@ export default function RootPage() {
         <div className={`${styles.heroContent} ${styles.reveal}`}>
           <div className={styles.badge}>
             <div className={styles.badgePulse}></div>
-            Client-Side Encrypted Snapshots
+            End-to-End Encrypted Tab Sync
           </div>
 
           <h1 className={styles.title}>
-            Your Tabs. Everywhere.<br />
+            Your Tabs. Everywhere.
+            <br />
             <span className={styles.titleHighlight}>Entirely Private.</span>
           </h1>
 
           <p className={styles.description}>
-            Seamlessly sync your active workspaces across all your devices.
-            Send specific tabs instantly where you need them. Tab snapshots are
-            encrypted in your browser before upload, so the stored data is ciphertext.
+            Sync your open tabs across browsers, travel back to any past session and send tabs to another
+            device. Tab titles and URLs are encrypted in your browser before upload; your password and keys
+            never leave your devices.
           </p>
 
           <div className={styles.ctas}>
             {isLoggedIn ? (
               <button className={styles.btnPrimary} onClick={() => router.push('/dashboard')}>
                 Launch Vault
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                  <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
               </button>
             ) : (
               <>
-                <button className={styles.btnPrimary} onClick={() => window.location.href = '/vaulttabs-extension.zip'}>
+                <button className={styles.btnPrimary} onClick={() => openExternal(EXTENSION_DOWNLOAD_URL)}>
                   Download Extension
                 </button>
                 <button className={styles.btnSecondary} onClick={() => router.push('/register')}>
@@ -134,19 +158,33 @@ export default function RootPage() {
 
             <div className={styles.browserContent}>
               <div className={styles.centerVault}>
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <svg
+                  width="48"
+                  height="48"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="var(--green)"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                   <path d="m9 12 2 2 4-4" />
                 </svg>
               </div>
 
               <div className={`${styles.syncTab} ${styles.syncTab1}`}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
                 localhost:3000
               </div>
 
               <div className={`${styles.syncTab} ${styles.syncTab2}`}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#39ff85" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#39ff85" strokeWidth="2">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                </svg>
                 Github - VaultTabs
               </div>
             </div>
@@ -157,22 +195,31 @@ export default function RootPage() {
       {/* CORE FEATURES (Alternating Layout) */}
       <section className={styles.section}>
         <div className={styles.sectionInner}>
-
           <div className={`${styles.featureRow} ${styles.reveal}`}>
             <div className={styles.featureText}>
               <div className={styles.featureSubtitle}>Continuous Sync</div>
               <h2 className={styles.featureTitle}>Pick up exactly where you left off.</h2>
               <p className={styles.featureDesc}>
-                A lightweight engine silently updates your state across devices.
-                Whether you switch from laptop to desktop, your tabs are right
-                there waiting for you. No manual refreshing required.
+                A lightweight engine silently updates your state across devices. Whether you switch from
+                laptop to desktop, your tabs are right there waiting for you. No manual refreshing required.
               </p>
             </div>
             <div className={styles.featureVisual}>
               <div className={styles.glassCard}>
                 <svg width="100%" height="200" viewBox="0 0 400 200" fill="none">
-                  <path d="M50 100 Q 200 10 350 100" stroke="rgba(57, 255, 133, 0.4)" strokeWidth="4" strokeDasharray="10 10">
-                    <animate attributeName="stroke-dashoffset" from="100" to="0" dur="2s" repeatCount="indefinite" />
+                  <path
+                    d="M50 100 Q 200 10 350 100"
+                    stroke="rgba(57, 255, 133, 0.4)"
+                    strokeWidth="4"
+                    strokeDasharray="10 10"
+                  >
+                    <animate
+                      attributeName="stroke-dashoffset"
+                      from="100"
+                      to="0"
+                      dur="2s"
+                      repeatCount="indefinite"
+                    />
                   </path>
                   <circle cx="50" cy="100" r="20" fill="#1e1e1e" stroke="var(--green)" strokeWidth="2" />
                   <circle cx="350" cy="100" r="20" fill="#1e1e1e" stroke="var(--green)" strokeWidth="2" />
@@ -188,16 +235,40 @@ export default function RootPage() {
               <div className={styles.featureSubtitle}>Teleportation</div>
               <h2 className={styles.featureTitle}>Beam tasks directly to other screens.</h2>
               <p className={styles.featureDesc}>
-                Found an interesting article on your phone but want to read it on your monitor? Hit the "Send" icon. It immediately pops open the target browser. No messy links, no email drafts.
+                Found an interesting article on your phone but want to read it on your monitor? Hit the "Send"
+                icon. It immediately pops open the target browser. No messy links, no email drafts.
               </p>
             </div>
             <div className={styles.featureVisual}>
               <div className={styles.glassCard}>
                 <svg width="100%" height="200" viewBox="0 0 400 200" fill="none">
-                  <rect x="50" y="40" width="120" height="120" rx="8" fill="var(--black-2)" stroke="var(--border)" />
-                  <rect x="230" y="40" width="120" height="120" rx="8" fill="var(--black-2)" stroke="var(--green)" />
+                  <rect
+                    x="50"
+                    y="40"
+                    width="120"
+                    height="120"
+                    rx="8"
+                    fill="var(--black-2)"
+                    stroke="var(--border)"
+                  />
+                  <rect
+                    x="230"
+                    y="40"
+                    width="120"
+                    height="120"
+                    rx="8"
+                    fill="var(--black-2)"
+                    stroke="var(--green)"
+                  />
                   <path d="M120 100 L 280 100" stroke="var(--green)" strokeWidth="3" markerEnd="url(#arrow)">
-                    <animate attributeName="stroke-dashoffset" from="200" to="0" dur="1s" repeatCount="indefinite" strokeDasharray="200" />
+                    <animate
+                      attributeName="stroke-dashoffset"
+                      from="200"
+                      to="0"
+                      dur="1s"
+                      repeatCount="indefinite"
+                      strokeDasharray="200"
+                    />
                   </path>
                   <circle cx="280" cy="100" r="8" fill="var(--green)">
                     <animate attributeName="r" values="8;16;8" dur="1s" repeatCount="indefinite" />
@@ -207,7 +278,6 @@ export default function RootPage() {
               </div>
             </div>
           </div>
-
         </div>
       </section>
 
@@ -227,12 +297,18 @@ export default function RootPage() {
           <div className={`${styles.stepCard} ${styles.reveal}`}>
             <div className={styles.stepNumber}>02</div>
             <h3>Create an Account</h3>
-            <p>A random Master Key is generated in your browser and protected by your password. Your tab snapshots are encrypted with it before upload.</p>
+            <p>
+              A random master key is generated in your browser and wrapped with a key derived from your
+              password. The server never receives the password itself.
+            </p>
           </div>
           <div className={`${styles.stepCard} ${styles.reveal}`}>
             <div className={styles.stepNumber}>03</div>
             <h3>Sync & Teleport</h3>
-            <p>Access your securely synced tabs from any device via the PWA, or push tabs directly to specific screens.</p>
+            <p>
+              Access your securely synced tabs from any device via the PWA, or push tabs directly to specific
+              screens.
+            </p>
           </div>
         </div>
       </section>
@@ -240,34 +316,86 @@ export default function RootPage() {
       {/* SECURITY GRID */}
       <section className={styles.securitySection}>
         <div className={`${styles.badge} ${styles.reveal}`}>Security Built-In</div>
-        <h2 className={`${styles.title} ${styles.reveal}`} style={{ fontSize: 'clamp(32px, 5vw, 56px)' }}>Encryption Model</h2>
+        <h2 className={`${styles.title} ${styles.reveal}`} style={{ fontSize: 'clamp(32px, 5vw, 56px)' }}>
+          Encryption Model
+        </h2>
         <p className={`${styles.description} ${styles.reveal}`} style={{ margin: '0 auto' }}>
-          Your browsing habits are deeply personal. <br />Snapshots are stored as ciphertext. Read the security model on GitHub for exactly what the server can and cannot see.
+          Your browsing habits are deeply personal. <br />
+          Here is exactly what is protected, and what is not.{' '}
+          <a
+            href={SECURITY_MODEL_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: 'var(--green)' }}
+          >
+            Read the full security model
+          </a>
+          .
         </p>
 
         <div className={styles.secGrid}>
           <div className={`${styles.secCard} ${styles.reveal}`}>
             <div className={styles.secIcon}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
             </div>
-            <h4>Client-Side Encrypted</h4>
-            <p>A random master key encrypts your tab snapshots with AES-256-GCM before upload. The master key is wrapped with a key derived from your password (PBKDF2, 100k rounds).</p>
+            <h4>End-to-End Encrypted</h4>
+            <p>
+              Tab URLs, titles, saved-session names and sent tabs are encrypted with AES-256-GCM in your
+              browser. Your password is stretched with PBKDF2-SHA256 (600k rounds); only a separate derived
+              sign-in key is sent to the server.
+            </p>
           </div>
 
           <div className={`${styles.secCard} ${styles.reveal}`}>
             <div className={styles.secIcon}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
             </div>
-            <h4>Ciphertext at Rest</h4>
-            <p>The database stores encrypted snapshots, your wrapped master key and a salted password hash. Caveat: your password is sent to the server (over HTTPS) at sign-in, so this is not zero-knowledge. Device names, timestamps and snapshot sizes are visible to the server.</p>
+            <h4>What the Server Sees</h4>
+            <p>
+              Your email, device names, timestamps, snapshot sizes and IP addresses. It cannot read your tabs.
+              Caveat: like any web app, this dashboard is served by the server, so you must trust the code it
+              delivers (or self-host it).
+            </p>
           </div>
 
           <div className={`${styles.secCard} ${styles.reveal}`}>
             <div className={styles.secIcon}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+              </svg>
             </div>
             <h4>Open Source Core</h4>
-            <p>Verify exactly how your data is treated. The entire Sync Engine, cryptography layer, and backend API are open for audit on GitHub.</p>
+            <p>
+              Verify exactly how your data is treated. The extension, this dashboard, the cryptography and the
+              backend API are open source and can be self-hosted.
+            </p>
           </div>
         </div>
       </section>
@@ -277,12 +405,16 @@ export default function RootPage() {
         <div className={`${styles.reveal}`}>
           <h2>Ready for a better browsing experience?</h2>
           {isLoggedIn ? (
-            <button className={styles.btnPrimary} style={{ margin: '0 auto' }} onClick={() => router.push('/dashboard')}>
+            <button
+              className={styles.btnPrimary}
+              style={{ margin: '0 auto' }}
+              onClick={() => router.push('/dashboard')}
+            >
               Go to Dashboard
             </button>
           ) : (
             <div className={styles.ctaButtons}>
-              <button className={styles.btnPrimary} onClick={() => window.location.href = '/vaulttabs-extension.zip'}>
+              <button className={styles.btnPrimary} onClick={() => openExternal(EXTENSION_DOWNLOAD_URL)}>
                 Download Extension
               </button>
               <button className={styles.btnSecondary} onClick={() => router.push('/register')}>

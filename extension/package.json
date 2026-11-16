@@ -1,23 +1,30 @@
 {
   "name": "vaulttabs-extension",
-  "version": "0.1.0",
-  "description": "VaultTabs browser extension - client-side encrypted tab sync",
+  "version": "1.0.0",
+  "private": true,
+  "description": "VaultTabs browser extension - end-to-end encrypted tab sync",
+  "license": "MIT",
+  "type": "module",
   "scripts": {
+    "prebuild": "tsc -p ../shared/tsconfig.json",
     "dev": "wxt",
     "dev:firefox": "wxt -b firefox",
     "build": "wxt build",
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
-    "postinstall": "wxt prepare || true"
+    "typecheck": "wxt prepare && tsc --noEmit",
+    "postinstall": "wxt prepare || true",
+    "prezip": "tsc -p ../shared/tsconfig.json",
+    "prebuild:firefox": "tsc -p ../shared/tsconfig.json",
+    "prezip:firefox": "tsc -p ../shared/tsconfig.json"
   },
   "dependencies": {
     "@vaulttabs/shared": "*",
-    "canvas": "^3.2.1",
-    "idb": "^8.0.0"
+    "idb": "^8.0.3"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
-    "wxt": "^0.19.0"
+    "typescript": "^5.9.3",
+    "wxt": "^0.21.5"
   }
 }

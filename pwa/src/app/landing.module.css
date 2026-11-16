@@ -10,7 +10,7 @@
 /* NAVBAR */
 .navbar {
   position: fixed;
-  top: 24px; 
+  top: 24px;
   left: 50%;
   transform: translateX(-50%);
   height: 60px;
@@ -26,7 +26,9 @@
   z-index: 1000;
   width: 90%;
   max-width: 900px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(57, 255, 133, 0.05);
+  box-shadow:
+    0 20px 40px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(57, 255, 133, 0.05);
   transition: all 0.3s ease;
 }
 
@@ -98,8 +100,11 @@
 
 .bgGrid {
   position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background-image: 
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image:
     linear-gradient(rgba(57, 255, 133, 0.04) 1px, transparent 1px),
     linear-gradient(90deg, rgba(57, 255, 133, 0.04) 1px, transparent 1px);
   background-size: 60px 60px;
@@ -110,8 +115,12 @@
 }
 
 @keyframes gridMove {
-  0% { background-position: 0 0; }
-  100% { background-position: 0 600px; }
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 0 600px;
+  }
 }
 
 .heroContent {
@@ -144,7 +153,8 @@
 }
 
 .badgePulse {
-  width: 8px; height: 8px;
+  width: 8px;
+  height: 8px;
   background: var(--green);
   border-radius: 50%;
   box-shadow: 0 0 10px var(--green);
@@ -152,8 +162,15 @@
 }
 
 @keyframes pulseLight {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.8); }
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.8);
+  }
 }
 
 .title {
@@ -163,7 +180,7 @@
   letter-spacing: -0.04em;
   margin-bottom: 24px;
   color: #fff;
-  text-shadow: 0 20px 40px rgba(0,0,0,0.5);
+  text-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
 }
 
 .titleHighlight {
@@ -249,7 +266,7 @@
   background: rgba(12, 12, 12, 0.85);
   border: 1px solid rgba(57, 255, 133, 0.15);
   border-radius: 16px;
-  box-shadow: 
+  box-shadow:
     0 40px 80px -20px rgba(0, 0, 0, 0.8),
     0 0 0 1px rgba(57, 255, 133, 0.05),
     0 0 60px rgba(57, 255, 133, 0.08);
@@ -266,8 +283,13 @@
 }
 
 @keyframes floatBrowser {
-  0%, 100% { transform: rotateX(8deg) translateY(0); }
-  50% { transform: rotateX(10deg) translateY(-20px); }
+  0%,
+  100% {
+    transform: rotateX(8deg) translateY(0);
+  }
+  50% {
+    transform: rotateX(10deg) translateY(-20px);
+  }
 }
 
 .browserTop {
@@ -280,10 +302,22 @@
   gap: 12px;
 }
 
-.dots { display: flex; gap: 8px; }
-.dot { width: 12px; height: 12px; border-radius: 50%; background: #ff5f56; }
-.dot:nth-child(2) { background: #ffbd2e; }
-.dot:nth-child(3) { background: #27c93f; }
+.dots {
+  display: flex;
+  gap: 8px;
+}
+.dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ff5f56;
+}
+.dot:nth-child(2) {
+  background: #ffbd2e;
+}
+.dot:nth-child(3) {
+  background: #27c93f;
+}
 
 .urlBar {
   flex: 1;
@@ -315,7 +349,8 @@
 .centerVault {
   position: relative;
   z-index: 2;
-  width: 120px; height: 120px;
+  width: 120px;
+  height: 120px;
   background: rgba(20, 20, 20, 0.8);
   border: 1px solid rgba(57, 255, 133, 0.3);
   border-radius: 30px;
@@ -327,8 +362,14 @@
 }
 
 @keyframes pulseVault {
-  0%, 100% { box-shadow: 0 0 40px rgba(57, 255, 133, 0.1); }
-  50% { box-shadow: 0 0 60px rgba(57, 255, 133, 0.3); transform: scale(1.02); }
+  0%,
+  100% {
+    box-shadow: 0 0 40px rgba(57, 255, 133, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 60px rgba(57, 255, 133, 0.3);
+    transform: scale(1.02);
+  }
 }
 
 .syncTab {
@@ -343,21 +384,41 @@
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 13px;
-  box-shadow: 0 20px 40px rgba(0,0,0,0.6), 0 0 15px rgba(57, 255, 133, 0.2);
+  box-shadow:
+    0 20px 40px rgba(0, 0, 0, 0.6),
+    0 0 15px rgba(57, 255, 133, 0.2);
   transform-style: preserve-3d;
   transition: all 0.5s;
 }
 
-.syncTab1 { top: 20%; left: 10%; animation: fly1 6s ease-in-out infinite; }
-.syncTab2 { bottom: 25%; right: 10%; animation: fly2 7s ease-in-out infinite; }
+.syncTab1 {
+  top: 20%;
+  left: 10%;
+  animation: fly1 6s ease-in-out infinite;
+}
+.syncTab2 {
+  bottom: 25%;
+  right: 10%;
+  animation: fly2 7s ease-in-out infinite;
+}
 
 @keyframes fly1 {
-  0%, 100% { transform: translateZ(20px) translate(0, 0) rotate(-5deg); }
-  50% { transform: translateZ(50px) translate(20px, -20px) rotate(0deg); }
+  0%,
+  100% {
+    transform: translateZ(20px) translate(0, 0) rotate(-5deg);
+  }
+  50% {
+    transform: translateZ(50px) translate(20px, -20px) rotate(0deg);
+  }
 }
 @keyframes fly2 {
-  0%, 100% { transform: translateZ(10px) translate(0, 0) rotate(5deg); }
-  50% { transform: translateZ(40px) translate(-20px, 20px) rotate(0deg); }
+  0%,
+  100% {
+    transform: translateZ(10px) translate(0, 0) rotate(5deg);
+  }
+  50% {
+    transform: translateZ(40px) translate(-20px, 20px) rotate(0deg);
+  }
 }
 
 /* ───────────────────────────────────────────────────────── */
@@ -384,7 +445,8 @@
 }
 
 @media (max-width: 900px) {
-  .featureRow, .featureRow:nth-child(even) {
+  .featureRow,
+  .featureRow:nth-child(even) {
     flex-direction: column;
     text-align: center;
     gap: 40px;
@@ -435,14 +497,17 @@
   padding: 40px;
   backdrop-filter: blur(20px);
   width: 100%;
-  box-shadow: 0 30px 60px rgba(0,0,0,0.5);
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
   position: relative;
   overflow: hidden;
 }
 .glassCard::before {
   content: '';
   position: absolute;
-  top: 0; left: 0; width: 100%; height: 2px;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
   background: linear-gradient(90deg, transparent, var(--green), transparent);
   opacity: 0.3;
 }
@@ -458,7 +523,9 @@
 }
 
 @keyframes lockSpin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .secGrid {
@@ -484,16 +551,26 @@
 }
 
 .secIcon {
-  width: 50px; height: 50px;
+  width: 50px;
+  height: 50px;
   background: rgba(57, 255, 133, 0.05);
   border-radius: 12px;
   color: var(--green);
-  display: flex; align-items: center; justify-content: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin-bottom: 24px;
 }
 
-.secCard h4 { font-size: 20px; color: #fff; margin-bottom: 12px; }
-.secCard p { color: var(--text-3); line-height: 1.6; }
+.secCard h4 {
+  font-size: 20px;
+  color: #fff;
+  margin-bottom: 12px;
+}
+.secCard p {
+  color: var(--text-3);
+  line-height: 1.6;
+}
 
 /* ───────────────────────────────────────────────────────── */
 /* CTA BOTTOM */
@@ -513,7 +590,7 @@
 .footer {
   text-align: center;
   padding: 40px;
-  border-top: 1px solid rgba(255,255,255,0.05);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
   color: var(--text-3);
   font-family: var(--font-mono);
   font-size: 13px;
@@ -533,8 +610,9 @@
 
 /* Utilities */
 .spinner {
-  width: 32px; height: 32px;
-  border: 3px solid rgba(255,255,255,0.1);
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(255, 255, 255, 0.1);
   border-top-color: var(--green);
   border-radius: 50%;
   animation: spin 1s linear infinite;
@@ -578,7 +656,9 @@
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(57, 255, 133, 0.3);
   transform: translateY(-5px);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), inset 0 0 40px rgba(57, 255, 133, 0.05);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.5),
+    inset 0 0 40px rgba(57, 255, 133, 0.05);
 }
 
 .stepNumber {
@@ -621,4 +701,3 @@
     padding: 0;
   }
 }
-

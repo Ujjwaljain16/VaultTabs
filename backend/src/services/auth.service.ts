@@ -1,116 +1,246 @@
-import { IAuthService, RegisterResult, LoginResult } from '../interfaces/auth.service.js';
-import { IUserRepository } from '../interfaces/user.repository.js';
-import { hashPassword, verifyPassword } from '../crypto/serverCrypto.js';
-import { User } from '../interfaces/models.js';
+import type { AuthResponse, MeResponse, PreloginResponse, RecoveryMaterialResponse } from '@vaulttabs/shared';
+import { DEFAULT_PBKDF2_ITERATIONS, KDF_VERSION_CURRENT } from '@vaulttabs/shared/crypto';
+import { deriveFakeBytes, hashSecret, verifyAgainstDummy, verifySecret } from '../crypto/serverCrypto.js';
+import { badRequest, conflict, HttpError, invalidCredentials, unauthorized } from '../errors.js';
+import type { UserRepository } from '../repositories/user.repository.js';
+import type { CredentialInput, PasswordMaterialInput, RecoveryMaterialInput } from '../schemas.js';
+import {
+  toCryptoParams,
+  toPublicUser,
+  type PasswordMaterialRow,
+  type RecoveryMaterialRow,
+  type UserRow,
+} from '../types.js';
 
-// Used to burn the same scrypt time when the email is unknown, so response timing
-// does not reveal whether an account exists.
-let dummyHashPromise: Promise<string> | undefined;
-function getDummyHash(): Promise<string> {
-    dummyHashPromise ??= hashPassword('vaulttabs-dummy-password');
-    return dummyHashPromise;
+export interface TokenClaims {
+  sub: string;
+  tv: number;
 }
 
-export class AuthService implements IAuthService {
-    constructor(
-        private userRepository: IUserRepository,
-        private jwtSecret: string,
-        private jwtSigner: (payload: any, options?: any) => string
-    ) { }
+export type SignToken = (claims: TokenClaims) => string;
 
-    async register(data: Omit<User, 'id' | 'created_at' | 'password_hash'> & { password_plaintext: string }): Promise<RegisterResult> {
-        const existing = await this.userRepository.findByEmail(data.email);
-        if (existing) {
-            throw new Error('Email already registered');
-        }
+/** Thrown when an authenticated user proves the wrong current password (not a session problem). */
+const wrongCurrentCredential = () =>
+  new HttpError(403, 'The current password is incorrect.', 'invalid_credentials');
 
-        const passwordHash = await hashPassword(data.password_plaintext);
+export class AuthService {
+  constructor(
+    private readonly users: UserRepository,
+    private readonly signToken: SignToken,
+    private readonly fakeDataKey: Buffer,
+  ) {}
 
-        let recoveryHashDb = undefined;
-        if (data.recovery_key_hash) {
-            recoveryHashDb = await hashPassword(data.recovery_key_hash);
-        }
+  private authResponse(user: UserRow): AuthResponse {
+    const response: AuthResponse = {
+      token: this.signToken({ sub: user.id, tv: user.token_version }),
+      user: toPublicUser(user),
+      crypto: toCryptoParams(user),
+    };
+    if (user.kdf_version < KDF_VERSION_CURRENT) response.upgrade_required = true;
+    return response;
+  }
 
-        const user = await this.userRepository.create({
-            ...data,
-            snapshot_retention: 50,
-            password_hash: passwordHash,
-            recovery_key_hash: recoveryHashDb,
-        });
+  private async requireUser(userId: string): Promise<UserRow> {
+    const user = await this.users.findById(userId);
+    // The authenticate hook already checked the user exists; this covers a concurrent delete.
+    if (!user) throw unauthorized('Your session has ended. Please log in again.', 'token_invalid');
+    return user;
+  }
 
-        const token = this.jwtSigner({ userId: user.id, email: user.email });
+  private async passwordRow(material: PasswordMaterialInput): Promise<PasswordMaterialRow> {
+    return {
+      password_hash: await hashSecret(material.auth_key),
+      salt: material.salt,
+      kdf_version: material.kdf_version,
+      kdf_iterations: material.kdf_iterations,
+      encrypted_master_key: material.encrypted_master_key,
+      master_key_iv: material.master_key_iv,
+    };
+  }
 
-        // Never return server-side secrets/hashes to the client.
-        const { password_hash, recovery_key_hash, ...userResult } = user;
-        return { user: userResult, token };
+  private async recoveryRow(material: RecoveryMaterialInput): Promise<RecoveryMaterialRow> {
+    return {
+      recovery_encrypted_master_key: material.recovery_encrypted_master_key,
+      recovery_key_iv: material.recovery_key_iv,
+      recovery_key_salt: material.recovery_key_salt,
+      recovery_key_hash: await hashSecret(material.recovery_key_hash),
+    };
+  }
+
+  /** Unknown emails get deterministic, plausible parameters so prelogin cannot enumerate accounts. */
+  async prelogin(email: string): Promise<PreloginResponse> {
+    const user = await this.users.findByEmail(email);
+    if (user) return { kdf_version: user.kdf_version, kdf_iterations: user.kdf_iterations, salt: user.salt };
+    return {
+      kdf_version: KDF_VERSION_CURRENT,
+      kdf_iterations: DEFAULT_PBKDF2_ITERATIONS,
+      salt: deriveFakeBytes(this.fakeDataKey, 'salt', email, 32).toString('base64'),
+    };
+  }
+
+  /**
+   * NOTE: a taken email returns 409. That reveals that the account exists; avoiding it would need
+   * email verification (send a mail instead of answering), which this server does not have.
+   * Registration is strictly rate-limited per IP to make bulk enumeration slow.
+   */
+  async register(
+    email: string,
+    password: PasswordMaterialInput,
+    recovery: RecoveryMaterialInput,
+  ): Promise<AuthResponse> {
+    const [passwordRow, recoveryRow] = await Promise.all([
+      this.passwordRow(password),
+      this.recoveryRow(recovery),
+    ]);
+    const user = await this.users.create({ email, ...passwordRow, ...recoveryRow });
+    if (!user)
+      throw conflict('An account with this email already exists. Please log in instead.', 'email_taken');
+    return this.authResponse(user);
+  }
+
+  async login(email: string, proof: { auth_key?: string; password?: string }): Promise<AuthResponse> {
+    const user = await this.users.findByEmail(email);
+    const secret = user
+      ? user.kdf_version >= KDF_VERSION_CURRENT
+        ? proof.auth_key
+        : proof.password
+      : undefined;
+    if (!user || secret === undefined) {
+      await verifyAgainstDummy(proof.auth_key ?? proof.password ?? '');
+      throw invalidCredentials();
     }
 
-    async login(email: string, password_plaintext: string): Promise<LoginResult> {
-        const user = await this.userRepository.findByEmail(email);
-        const invalidError = new Error('Invalid credentials');
+    const { ok, needsRehash } = await verifySecret(secret, user.password_hash);
+    if (!ok) throw invalidCredentials();
 
-        if (!user) {
-            await verifyPassword(password_plaintext, await getDummyHash());
-            throw invalidError;
-        }
-
-        const isValid = await verifyPassword(password_plaintext, user.password_hash);
-        if (!isValid) {
-            throw invalidError;
-        }
-
-        const token = this.jwtSigner({ userId: user.id, email: user.email });
-
-        return {
-            user: {
-                id: user.id,
-                email: user.email,
-                created_at: user.created_at,
-                snapshot_retention: user.snapshot_retention || 50,
-            },
-            token,
-            crypto: {
-                encrypted_master_key: user.encrypted_master_key,
-                master_key_iv: user.master_key_iv,
-                salt: user.salt,
-            }
-        };
+    let current = user;
+    if (needsRehash) {
+      current =
+        (await this.users.updateCredentials(
+          user.id,
+          { password_hash: await hashSecret(secret) },
+          { revokeSessions: false },
+        )) ?? user;
     }
+    return this.authResponse(current);
+  }
 
-    async getMe(userId: string): Promise<LoginResult> {
-        const user = await this.userRepository.findById(userId);
-        if (!user) {
-            throw new Error('User not found');
-        }
-
-        return {
-            user: {
-                id: user.id,
-                email: user.email,
-                snapshot_retention: user.snapshot_retention || 50,
-                created_at: user.created_at,
-            },
-            token: '',
-            crypto: {
-                encrypted_master_key: user.encrypted_master_key,
-                master_key_iv: user.master_key_iv,
-                salt: user.salt,
-            }
-        };
+  /** Legacy (kdf_version 1) account → v2 password material. Sessions stay valid. */
+  async upgrade(userId: string, password: string, material: PasswordMaterialInput): Promise<AuthResponse> {
+    const user = await this.requireUser(userId);
+    if (user.kdf_version >= KDF_VERSION_CURRENT) {
+      throw conflict('This account already uses the current key derivation.', 'already_upgraded');
     }
+    const { ok } = await verifySecret(password, user.password_hash);
+    if (!ok) throw wrongCurrentCredential();
+    const updated = await this.users.updateCredentials(user.id, await this.passwordRow(material), {
+      revokeSessions: false,
+    });
+    return this.authResponse(updated ?? user);
+  }
 
-    async getRecoveryMaterial(email: string): Promise<any> {
-        const user = await this.userRepository.findByEmail(email);
-        if (!user || !user.recovery_encrypted_master_key) {
-            throw new Error('Recovery material not found');
-        }
+  async me(userId: string): Promise<MeResponse> {
+    const user = await this.requireUser(userId);
+    return { user: toPublicUser(user), crypto: toCryptoParams(user) };
+  }
 
-        return {
-            email: user.email,
-            recovery_encrypted_master_key: user.recovery_encrypted_master_key,
-            recovery_key_iv: user.recovery_key_iv,
-            recovery_key_salt: user.recovery_key_salt,
-            // recovery_key_hash (the server-side verifier) is intentionally NOT returned.
-        };
+  /** v2 accounts must prove auth_key, legacy accounts their password. */
+  async verifyCredential(user: UserRow, current: CredentialInput): Promise<void> {
+    const isV2 = user.kdf_version >= KDF_VERSION_CURRENT;
+    const secret = isV2
+      ? 'auth_key' in current
+        ? current.auth_key
+        : undefined
+      : 'password' in current
+        ? current.password
+        : undefined;
+    if (secret === undefined) {
+      throw badRequest(
+        isV2 ? 'This account requires current.auth_key.' : 'This account requires current.password.',
+        'credential_type',
+      );
     }
+    const { ok } = await verifySecret(secret, user.password_hash);
+    if (!ok) throw wrongCurrentCredential();
+  }
+
+  /** New password material; every existing session (including the caller's token) ends. */
+  async changePassword(
+    userId: string,
+    current: CredentialInput,
+    next: PasswordMaterialInput,
+  ): Promise<AuthResponse> {
+    const user = await this.requireUser(userId);
+    await this.verifyCredential(user, current);
+    const updated = await this.users.updateCredentials(user.id, await this.passwordRow(next), {
+      revokeSessions: true,
+    });
+    if (!updated) throw unauthorized('Your session has ended. Please log in again.', 'token_invalid');
+    return this.authResponse(updated);
+  }
+
+  async regenerateRecovery(
+    userId: string,
+    current: CredentialInput,
+    recovery: RecoveryMaterialInput,
+  ): Promise<void> {
+    const user = await this.requireUser(userId);
+    await this.verifyCredential(user, current);
+    await this.users.updateCredentials(user.id, await this.recoveryRow(recovery), { revokeSessions: false });
+  }
+
+  async logoutAll(userId: string): Promise<AuthResponse> {
+    const updated = await this.users.updateCredentials(userId, {}, { revokeSessions: true });
+    if (!updated) throw unauthorized('Your session has ended. Please log in again.', 'token_invalid');
+    return this.authResponse(updated);
+  }
+
+  /** Unknown emails (and accounts without a recovery code) get deterministic fake material. */
+  async recoveryMaterial(email: string): Promise<RecoveryMaterialResponse> {
+    const user = await this.users.findByEmail(email);
+    if (
+      user?.recovery_encrypted_master_key &&
+      user.recovery_key_iv &&
+      user.recovery_key_salt &&
+      user.recovery_key_hash
+    ) {
+      return {
+        recovery_encrypted_master_key: user.recovery_encrypted_master_key,
+        recovery_key_iv: user.recovery_key_iv,
+        recovery_key_salt: user.recovery_key_salt,
+      };
+    }
+    const fake = (label: string, n: number) =>
+      deriveFakeBytes(this.fakeDataKey, label, email, n).toString('base64');
+    return {
+      recovery_encrypted_master_key: fake('recovery-key', 48),
+      recovery_key_iv: fake('recovery-iv', 12),
+      recovery_key_salt: fake('recovery-salt', 32),
+    };
+  }
+
+  /** Recovery code → new password AND new recovery code; every session ends. */
+  async recover(
+    email: string,
+    recoveryKeyHash: string,
+    next: PasswordMaterialInput,
+    recovery: RecoveryMaterialInput,
+  ): Promise<void> {
+    const user = await this.users.findByEmail(email);
+    const { ok } = await verifySecret(recoveryKeyHash, user?.recovery_key_hash);
+    if (!user || !ok) {
+      throw new HttpError(401, 'The recovery code is not valid for this account.', 'invalid_recovery_code');
+    }
+    const [passwordRow, recoveryRow] = await Promise.all([
+      this.passwordRow(next),
+      this.recoveryRow(recovery),
+    ]);
+    await this.users.updateCredentials(user.id, { ...passwordRow, ...recoveryRow }, { revokeSessions: true });
+  }
+
+  async deleteAccount(userId: string, current: CredentialInput): Promise<void> {
+    const user = await this.requireUser(userId);
+    await this.verifyCredential(user, current);
+    await this.users.delete(user.id);
+  }
 }

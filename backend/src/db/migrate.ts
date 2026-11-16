@@ -1,112 +1,73 @@
-// Creates necessary database tables for VaultTabs
+// Versioned schema migrations.
+//
+//   npm run db:migrate            (dev, via tsx)
+//   node dist/db/migrate.js       (production / Docker; runs before the server starts)
+//
+// Each migration runs in its own transaction while holding a transaction-scoped advisory lock, so
+// several instances starting at once apply every migration exactly once.
 
-import sql from './client.js';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import type { Sql } from './client.js';
+import { migrations } from './migrations/index.js';
+import type { Logger } from '../logger.js';
 
-async function migrate() {
-  console.log('[*] Running database migrations...\n');
+/** Arbitrary constant identifying "VaultTabs schema migrations" among advisory locks. */
+const MIGRATION_LOCK_KEY = 7_265_840_211;
 
-  try {
-    // Users Table
-    await sql`
-      CREATE TABLE IF NOT EXISTS users (
-        id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        email               TEXT UNIQUE NOT NULL,
-        password_hash       TEXT NOT NULL,
-        encrypted_master_key TEXT NOT NULL,
-        master_key_iv       TEXT NOT NULL,
-        salt                TEXT NOT NULL,
-        recovery_encrypted_master_key TEXT,
-        recovery_key_iv               TEXT,
-        recovery_key_salt             TEXT,
-        recovery_key_hash             TEXT,
-        snapshot_retention  INTEGER NOT NULL DEFAULT 50,
-        created_at          TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-        updated_at          TIMESTAMPTZ DEFAULT NOW() NOT NULL
-      );
-    `;
-    console.log('[+] Table "users" ready');
-
-    await sql`
-      ALTER TABLE users 
-        ADD COLUMN IF NOT EXISTS snapshot_retention INTEGER NOT NULL DEFAULT 50,
-        ADD COLUMN IF NOT EXISTS recovery_encrypted_master_key TEXT,
-        ADD COLUMN IF NOT EXISTS recovery_key_iv TEXT,
-        ADD COLUMN IF NOT EXISTS recovery_key_salt TEXT,
-        ADD COLUMN IF NOT EXISTS recovery_key_hash TEXT;
-    `;
-
-    // Devices Table
-    await sql`
-      CREATE TABLE IF NOT EXISTS devices (
-        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        device_name TEXT NOT NULL,
-        fingerprint TEXT,
-        last_seen   TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-        created_at  TIMESTAMPTZ DEFAULT NOW() NOT NULL
-      );
-    `;
-    console.log('[+] Table "devices" ready');
-
-    await sql`
-      ALTER TABLE devices 
-        ADD COLUMN IF NOT EXISTS fingerprint TEXT;
-    `;
-    console.log('[+] Column "fingerprint" in devices ready');
-
-    // Snapshots Table
-    await sql`
-      CREATE TABLE IF NOT EXISTS snapshots (
-        id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        device_id    UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-        captured_at  TIMESTAMPTZ NOT NULL,
-        iv           TEXT NOT NULL,
-        encrypted_blob TEXT NOT NULL,
-        created_at   TIMESTAMPTZ DEFAULT NOW() NOT NULL
-      );
-    `;
-    console.log('[+] Table "snapshots" ready');
-
-    // Indexes
-    await sql`CREATE INDEX IF NOT EXISTS idx_snapshots_user_device ON snapshots(user_id, device_id, captured_at DESC);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_snapshots_device_captured ON snapshots(device_id, captured_at DESC);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_snapshots_user_captured ON snapshots(user_id, captured_at DESC);`;
-    console.log('[+] Indexes ready');
-
-    // Restore Requests Table
-    await sql`
-      CREATE TABLE IF NOT EXISTS restore_requests (
-        id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        target_device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-        snapshot_id UUID REFERENCES snapshots(id) ON DELETE SET NULL,
-        status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed', 'expired')),
-        error_msg   TEXT,
-        created_at  TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-        updated_at  TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-        expires_at  TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '5 minutes') NOT NULL
-      );
-    `;
-    console.log('[+] Table "restore_requests" ready');
-
-    await sql`CREATE INDEX IF NOT EXISTS idx_restore_device_status ON restore_requests(target_device_id, status, expires_at);`;
-    await sql`
-      ALTER TABLE restore_requests 
-        ADD COLUMN IF NOT EXISTS source_device_id UUID REFERENCES devices(id),
-        ADD COLUMN IF NOT EXISTS target_url TEXT;
-    `;
-    console.log('[+] Columns "source_device_id" and "target_url" in restore_requests ready');
-
-    console.log('\n[*] All migrations complete! Your database is ready.');
-
-  } catch (error) {
-    console.error('\n[!] Migration failed:', error);
-    process.exit(1);
-  }
-
-  await sql.end();
+export interface RunMigrationsOptions {
+  log?: Logger;
+  /** Stop after applying this migration id (tests). */
+  until?: string;
 }
 
-migrate();
+/** Applies all pending migrations; returns the ids that were applied by this call. */
+export async function runMigrations(sql: Sql, options: RunMigrationsOptions = {}): Promise<string[]> {
+  const applied: string[] = [];
+  for (const migration of migrations) {
+    const didApply = await sql.begin(async tx => {
+      await tx.unsafe(`SELECT pg_advisory_xact_lock(${MIGRATION_LOCK_KEY})`);
+      await tx`
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+          id         TEXT PRIMARY KEY,
+          applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      const [existing] = await tx`SELECT 1 FROM schema_migrations WHERE id = ${migration.id}`;
+      if (existing) return false;
+      await migration.up(tx);
+      await tx`INSERT INTO schema_migrations (id) VALUES (${migration.id})`;
+      return true;
+    });
+    if (didApply) {
+      applied.push(migration.id);
+      options.log?.info({ migration: migration.id }, 'migration applied');
+    }
+    if (options.until && migration.id === options.until) break;
+  }
+  return applied;
+}
+
+async function main(): Promise<void> {
+  const { config: loadDotenv } = await import('dotenv');
+  loadDotenv({ override: false, quiet: true });
+  const { loadDatabaseConfig } = await import('../config.js');
+  const { createSql } = await import('./client.js');
+  const { createCliLogger } = await import('../logger.js');
+
+  const log = createCliLogger();
+  const sql = createSql(loadDatabaseConfig(), { max: 1 });
+  try {
+    const applied = await runMigrations(sql, { log });
+    log.info({ applied }, applied.length ? 'migrations complete' : 'database schema is up to date');
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
+
+if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+  main().catch(err => {
+    process.stderr.write(`Migration failed: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exit(1);
+  });
+}

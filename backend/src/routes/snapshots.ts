@@ -1,88 +1,143 @@
-import { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { LIMITS } from '@vaulttabs/shared';
+import { SNAPSHOT_ENC_CURRENT } from '@vaulttabs/shared/crypto';
 import { z } from 'zod';
-import { Container } from '../container.js';
-import { authenticate } from '../middleware/auth.js';
+import { isBase64OfLength } from '../crypto/serverCrypto.js';
+import { badRequest, parseOrThrow } from '../errors.js';
+import type { SnapshotPatch } from '../repositories/snapshot.repository.js';
+import { uuid } from '../schemas.js';
+import { idParam, type RouteDeps } from './common.js';
 
-const UploadSnapshotSchema = z.object({
-  device_id: z.string().uuid('device_id must be a valid UUID'),
-  captured_at: z.string().datetime('captured_at must be an ISO datetime string'),
-  iv: z.string().min(1, 'iv is required').max(64, 'iv too long'),
-  encrypted_blob: z.string().min(1).max(500_000, 'Snapshot blob too large (max 500KB)'),
+const MAX_FUTURE_SKEW_MS = 10 * 60 * 1000;
+const MAX_LABEL_ENC_CHARS = 1024;
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+
+const iv12 = (name: string) =>
+  z.string().refine(v => isBase64OfLength(v, 12), `${name} must be base64 of 12 bytes`);
+
+const UploadBody = z.object({
+  device_id: uuid,
+  captured_at: z.iso.datetime({ offset: true, error: 'captured_at must be an ISO 8601 timestamp' }),
+  iv: iv12('iv'),
+  encrypted_blob: z
+    .string()
+    .min(1, 'encrypted_blob is required')
+    .max(
+      LIMITS.maxSnapshotBlobChars,
+      `encrypted_blob must be at most ${LIMITS.maxSnapshotBlobChars} characters`,
+    )
+    .regex(BASE64_RE, 'encrypted_blob must be base64'),
+  enc_version: z.literal(SNAPSHOT_ENC_CURRENT),
 });
 
-type UploadSnapshotBody = z.infer<typeof UploadSnapshotSchema>;
+const HistoryQuery = z.object({
+  device_id: uuid.optional(),
+  limit: z.coerce.number().int().catch(20).optional(),
+  before: z.iso.datetime({ offset: true, error: 'before must be an ISO 8601 timestamp' }).optional(),
+});
 
-export async function snapshotRoutes(fastify: FastifyInstance, options: { container: Container }) {
-  const { syncService } = options.container;
+const PatchBody = z
+  .object({
+    pinned: z.boolean().optional(),
+    label_enc: z
+      .string()
+      .min(1)
+      .max(MAX_LABEL_ENC_CHARS, `label_enc must be at most ${MAX_LABEL_ENC_CHARS} characters`)
+      .regex(BASE64_RE, 'label_enc must be base64')
+      .nullable()
+      .optional(),
+    label_iv: iv12('label_iv').nullable().optional(),
+  })
+  .refine(b => (b.label_enc === undefined) === (b.label_iv === undefined), {
+    message: 'label_enc and label_iv must be sent together',
+    path: ['label_enc'],
+  })
+  .refine(b => (b.label_enc === null) === (b.label_iv === null), {
+    message: 'label_enc and label_iv must both be null to clear the label',
+    path: ['label_enc'],
+  });
 
-  fastify.post<{ Body: UploadSnapshotBody }>('/snapshots', {
-    preHandler: [authenticate],
-  }, async (request, reply) => {
-    const { userId } = request.user;
+export async function snapshotRoutes(fastify: FastifyInstance, { container, authenticate }: RouteDeps) {
+  const { snapshotService } = container;
 
-    const parseResult = UploadSnapshotSchema.safeParse(request.body);
-    if (!parseResult.success) {
-      return reply.status(400).send({
-        error: 'Validation failed',
-        details: parseResult.error.flatten().fieldErrors,
-      });
-    }
-
-    try {
-      const snapshot = await syncService.uploadSnapshot(userId, {
-        ...parseResult.data,
-        captured_at: new Date(parseResult.data.captured_at),
-      });
-
-      return reply.status(201).send({
-        message: 'Snapshot stored',
-        snapshot_id: snapshot.id,
-        captured_at: snapshot.captured_at,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Upload failed';
-      if (msg === 'This device does not belong to your account.') {
-        return reply.status(403).send({
-          error: 'Forbidden',
-          message: msg,
-        });
+  fastify.post(
+    '/snapshots',
+    {
+      preHandler: authenticate,
+      // Base64 blob + JSON overhead.
+      bodyLimit: LIMITS.maxSnapshotBlobChars + 64 * 1024,
+      config: {
+        // Per user, after authentication (several browsers may share one IP).
+        rateLimit: {
+          max: 60,
+          timeWindow: '1 minute',
+          hook: 'preHandler',
+          keyGenerator: (request: FastifyRequest) => `snapshots:${request.user?.userId ?? request.ip}`,
+        },
+      },
+    },
+    async (request, reply) => {
+      const raw = request.body as { enc_version?: unknown } | null | undefined;
+      if (raw && typeof raw === 'object' && raw.enc_version !== SNAPSHOT_ENC_CURRENT) {
+        throw badRequest(
+          'This snapshot format (enc_version 1) is no longer accepted. Please update your VaultTabs extension.',
+          'unsupported_enc_version',
+        );
       }
-      throw err;
-    }
-  });
-
-  fastify.get('/snapshots/latest', {
-    preHandler: [authenticate],
-  }, async (request, reply) => {
-    const { userId } = request.user;
-    const snapshots = await syncService.getLatestSnapshots(userId);
-    return reply.send({ snapshots });
-  });
-
-  fastify.get<{
-    Querystring: { device_id: string; limit?: string }
-  }>('/snapshots/history', {
-    preHandler: [authenticate],
-  }, async (request, reply) => {
-    const { userId } = request.user;
-    const { device_id, limit = '20' } = request.query;
-
-    if (!device_id || !z.string().uuid().safeParse(device_id).success) {
-      return reply.status(400).send({ error: 'device_id query param is required (UUID)' });
-    }
-
-    const limitNum = Math.min(50, Math.max(1, parseInt(limit) || 20));
-
-    try {
-      const snapshots = await syncService.getSnapshotHistory(userId, device_id, limitNum);
-      return reply.send({ snapshots });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to fetch history';
-      if (msg === 'Device not found or access denied') {
-        return reply.status(403).send({ error: msg });
+      const body = parseOrThrow(UploadBody, request.body);
+      const capturedAt = new Date(body.captured_at);
+      if (capturedAt.getTime() > Date.now() + MAX_FUTURE_SKEW_MS) {
+        throw badRequest('captured_at is in the future. Check the device clock.', 'captured_at_in_future');
       }
-      throw err;
-    }
+      const result = await snapshotService.upload(request.user.userId, {
+        device_id: body.device_id.toLowerCase(),
+        captured_at: capturedAt,
+        iv: body.iv,
+        encrypted_blob: body.encrypted_blob,
+        enc_version: body.enc_version,
+      });
+      return reply.status(201).send(result);
+    },
+  );
+
+  fastify.get('/snapshots/latest', { preHandler: authenticate }, async request => ({
+    snapshots: await snapshotService.latest(request.user.userId),
+  }));
+
+  fastify.get('/snapshots/history', { preHandler: authenticate }, async request => {
+    const query = parseOrThrow(HistoryQuery, request.query);
+    const limit = Math.min(LIMITS.maxHistoryPage, Math.max(1, query.limit ?? 20));
+    return snapshotService.history(
+      request.user.userId,
+      query.device_id?.toLowerCase() ?? null,
+      query.before ? new Date(query.before) : null,
+      limit,
+    );
   });
 
+  fastify.get('/snapshots/saved', { preHandler: authenticate }, async request => ({
+    snapshots: await snapshotService.saved(request.user.userId),
+  }));
+
+  fastify.get('/snapshots/:id', { preHandler: authenticate }, async request => ({
+    snapshot: await snapshotService.get(request.user.userId, idParam(request.params, 'Snapshot')),
+  }));
+
+  fastify.patch('/snapshots/:id', { preHandler: authenticate }, async request => {
+    const id = idParam(request.params, 'Snapshot');
+    const body = parseOrThrow(PatchBody, request.body);
+    const patch: SnapshotPatch = { pinned: body.pinned };
+    if (body.label_enc !== undefined && body.label_iv !== undefined) {
+      patch.label =
+        body.label_enc === null || body.label_iv === null
+          ? null
+          : { label_enc: body.label_enc, label_iv: body.label_iv };
+    }
+    return { snapshot: await snapshotService.update(request.user.userId, id, patch) };
+  });
+
+  fastify.delete('/snapshots/:id', { preHandler: authenticate }, async request => {
+    await snapshotService.remove(request.user.userId, idParam(request.params, 'Snapshot'));
+    return { message: 'Snapshot deleted.' };
+  });
 }

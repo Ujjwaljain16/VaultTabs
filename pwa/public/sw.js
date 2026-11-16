@@ -1,63 +1,83 @@
-const CACHE_NAME = 'vaulttabs-v2';
+/* VaultTabs service worker.
+ *
+ * - Precaches only a static offline page (nothing user-specific).
+ * - Navigations: network-first; successful same-origin HTML is cached so the app shell (and the
+ *   offline /unlock page) still opens without a connection; otherwise /offline.html.
+ *   Pages contain no user data: everything sensitive is fetched and decrypted client-side.
+ * - Cache-first only for immutable build assets (/_next/static/*) and icons.
+ * - API responses and cross-origin requests are never touched or cached.
+ */
 
-self.addEventListener('install', (event) => {
-  self.skipWaiting();
+const VERSION = 'v3';
+const SHELL_CACHE = `vaulttabs-shell-${VERSION}`;
+const STATIC_CACHE = `vaulttabs-static-${VERSION}`;
+const OFFLINE_URL = '/offline.html';
+const CACHEABLE_PAGES = new Set(['/', '/login', '/register', '/unlock', '/dashboard', '/devices', '/settings']);
+const STATIC_ASSETS = /^\/(_next\/static\/|icon-\d+\.png$|favicon\.png$|manifest\.json$)/;
+
+self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      // Don't pre-cache '/' right away to ensure we don't accidentally cache a redirect error state
-      return cache.addAll(['/manifest.json']);
-    })
+    caches
+      .open(SHELL_CACHE)
+      .then(cache => cache.add(new Request(OFFLINE_URL, { cache: 'reload' })))
+      .then(() => self.skipWaiting()),
   );
 });
 
-self.addEventListener('activate', (event) => {
+self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    }).then(() => self.clients.claim())
+    caches
+      .keys()
+      .then(keys =>
+        Promise.all(
+          keys
+            .filter(k => k.startsWith('vaulttabs-') && k !== SHELL_CACHE && k !== STATIC_CACHE)
+            .map(k => caches.delete(k)),
+        ),
+      )
+      .then(() => self.clients.claim()),
   );
 });
 
-self.addEventListener('fetch', (event) => {
-  // Network-first strategy for navigation requests (like '/')
-  if (event.request.mode === 'navigate') {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          // Clone the response and cache it, then return it
-          const responseToCache = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
-          return response;
-        })
-        .catch(() => {
-          // If network fails, fall back to cache
-          return caches.match(event.request);
-        })
-    );
+self.addEventListener('fetch', event => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  // Never handle cross-origin requests (the API lives on its own origin) or any /api path.
+  if (url.origin !== self.location.origin || url.pathname.startsWith('/api')) return;
+
+  if (req.mode === 'navigate') {
+    event.respondWith(networkFirstPage(req, url));
     return;
   }
 
-  // Cache-first for other assets
-  event.respondWith(
-    caches.match(event.request).then((response) => {
-      return response || fetch(event.request).then((networkResponse) => {
-        // Cache dynamic responses as well (icons, etc) if they succeed
-        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
-        }
-        return networkResponse;
-      });
-    })
-  );
+  // React Server Component payloads and everything else dynamic: straight to the network.
+  if (req.headers.get('RSC') || url.searchParams.has('_rsc')) return;
+
+  if (STATIC_ASSETS.test(url.pathname)) {
+    event.respondWith(cacheFirst(req));
+  }
 });
+
+async function networkFirstPage(req, url) {
+  try {
+    const res = await fetch(req);
+    if (res.ok && res.type === 'basic' && !res.redirected && CACHEABLE_PAGES.has(url.pathname)) {
+      const cache = await caches.open(SHELL_CACHE);
+      await cache.put(url.pathname, res.clone());
+    }
+    return res;
+  } catch {
+    const cache = await caches.open(SHELL_CACHE);
+    return (await cache.match(url.pathname)) || (await cache.match(OFFLINE_URL)) || Response.error();
+  }
+}
+
+async function cacheFirst(req) {
+  const cache = await caches.open(STATIC_CACHE);
+  const hit = await cache.match(req);
+  if (hit) return hit;
+  const res = await fetch(req);
+  if (res.ok && res.type === 'basic') await cache.put(req, res.clone());
+  return res;
+}

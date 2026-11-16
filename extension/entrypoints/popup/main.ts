@@ -1,855 +1,1054 @@
 /**
- * entrypoints/popup/main.ts
+ * Popup UI. Screens: loading, auth (login/register), recovery key, re-login, main. The main
+ * screen has three views: this browser's tabs, other devices, settings.
  *
- * Popup UI controller. Handles all 4 screens:
- *   1. screen-loading  → shown while we check auth state
- *   2. screen-auth     → register or login forms
- *   3. screen-dashboard → live tab list + sync status
- *   4. screen-relogin  → password prompt when master key expired
- *
- * LIVE UPDATES:
- * The popup listens for SYNC_COMPLETE messages from the background worker.
- * When received, it refreshes the tab list and status WITHOUT closing/reopening.
+ * All untrusted text (tab titles/URLs, device names, server messages) is inserted with
+ * textContent / DOM APIs only.
  */
 
 import {
-  generateSalt, generateMasterKey,
-  deriveWrappingKey, encryptMasterKey, decryptMasterKey,
-  generateRecoveryCode, encryptMasterKeyForRecovery,
-  hashRecoveryCode,
-} from '../../utils/crypto';
-
+  LIMITS,
+  RESTORE_ERROR_MESSAGES,
+  type Device,
+  type RestoreErrorCode,
+  type SnapshotWithDevice,
+  type TabSnapshot,
+} from '@vaulttabs/shared';
+import { decryptSnapshot, encryptRestorePayload, isSafeTabUrl } from '@vaulttabs/shared/crypto';
+import { browser, type Browser } from 'wxt/browser';
+import { api, defaultDeviceName, errorMessage, SESSION_ENDED_MESSAGE } from '../../utils/api';
+import { LegacyUpgradeConsentRequired, login, passwordStrength, register } from '../../utils/auth';
+import { DASHBOARD_URL } from '../../utils/config';
+import { normalizeDomainInput } from '../../utils/domains';
+import { isBackgroundBroadcast, type PopupRequest, type SyncNowResponse } from '../../utils/messages';
 import {
-  saveToStorage, loadFromStorage,
-  clearStorage, saveMasterKey, clearMasterKey, loadMasterKey,
+  getActiveSession,
+  loadState,
+  logout,
+  patchState,
+  type ActiveSession,
+  type LocalState,
 } from '../../utils/storage';
+import { openUrlsInNewWindow } from '../../utils/tabs';
 
-import { getBrowserFingerprint } from '../../utils/fingerprint';
+// ─── DOM helpers ───────────────────────────────────────────────────────────────────────────────
 
-import {
-  apiRegister, apiLogin, apiRegisterDevice, apiRenameDevice, getDeviceName,
-  apiGetDevices, apiCreateRestoreRequest, apiGetRestoreStatus, type Device
-} from '../../utils/api';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ELEMENT HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-
-function el<T extends HTMLElement>(id: string): T {
-  const e = document.getElementById(id) as T | null;
+function el<T extends HTMLElement = HTMLElement>(id: string): T {
+  const e = document.getElementById(id);
   if (!e) throw new Error(`#${id} not found`);
-  return e;
+  return e as T;
 }
 
-/** Escape text before interpolating it into an innerHTML template. */
-function escapeHtml(value: unknown): string {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+type Child = Node | string | null | undefined | false;
+
+function h<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  props: { className?: string; text?: string; title?: string; type?: string } = {},
+  ...children: Child[]
+): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag);
+  if (props.className) node.className = props.className;
+  if (props.text !== undefined) node.textContent = props.text;
+  if (props.title !== undefined) node.title = props.title;
+  if (props.type !== undefined) node.setAttribute('type', props.type);
+  for (const c of children) if (c) node.append(c);
+  return node;
 }
 
-function showScreen(id: string) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
-  el(id).classList.remove('hidden');
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const ICON_PATHS = {
+  send: ['m22 2-7 20-4-9-9-4Z', 'M22 2 11 13'],
+  window: ['M3 5h18v14H3z', 'M3 9h18'],
+} as const;
+
+function icon(name: keyof typeof ICON_PATHS, size = 14): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', String(size));
+  svg.setAttribute('height', String(size));
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('icon');
+  for (const d of ICON_PATHS[name]) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return svg;
 }
 
-function showError(id: string, msg: string) {
+const SCREENS = [
+  'screen-loading',
+  'screen-auth',
+  'screen-recovery',
+  'screen-relogin',
+  'screen-main',
+] as const;
+type ScreenId = (typeof SCREENS)[number];
+let currentScreen: ScreenId = 'screen-loading';
+
+function showScreen(id: ScreenId): void {
+  for (const s of SCREENS) el(s).classList.toggle('hidden', s !== id);
+  currentScreen = id;
+}
+
+function showError(id: string, msg: string): void {
   const e = el(id);
   e.textContent = msg;
   e.classList.remove('hidden');
 }
-function hideError(id: string) { el(id).classList.add('hidden'); }
 
-function setLoading(btn: HTMLButtonElement, loading: boolean) {
+function hideError(id: string): void {
+  el(id).classList.add('hidden');
+}
+
+function setLoading(btn: HTMLButtonElement, loading: boolean): void {
   btn.disabled = loading;
   btn.querySelector('.btn-text')?.classList.toggle('hidden', loading);
   btn.querySelector('.btn-loading')?.classList.toggle('hidden', !loading);
 }
 
-let currentTabs: chrome.tabs.Tab[] = [];
-let userDevices: Device[] = [];
-let restorePollInterval: ReturnType<typeof setInterval> | null = null;
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
+function toast(text: string, isError = false): void {
+  const t = el('toast');
+  t.textContent = text;
+  t.classList.toggle('error', isError);
+  t.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.add('hidden'), 3500);
+}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// INIT — runs once when popup opens
-// ─────────────────────────────────────────────────────────────────────────────
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
 
-async function init() {
+function letterAvatar(url: string): HTMLElement {
+  const letter =
+    hostOf(url)
+      .replace(/^www\./, '')
+      .charAt(0) || '?';
+  return h('div', { className: 'letter-avatar', text: letter });
+}
+
+/** Favicon for a LOCAL tab, from the browser's own tab data. */
+function localFavicon(tab: Browser.tabs.Tab): HTMLElement {
+  const src = tab.favIconUrl;
+  if (src && (src.startsWith('data:image/') || isSafeTabUrl(src))) {
+    const img = h('img', { className: 'tab-favicon' });
+    img.alt = '';
+    img.referrerPolicy = 'no-referrer';
+    img.src = src;
+    img.addEventListener('error', () => img.replaceWith(letterAvatar(tab.url ?? '')), { once: true });
+    return img;
+  }
+  return letterAvatar(tab.url ?? '');
+}
+
+function timeAgo(value: string | Date | null | undefined): string {
+  if (!value) return 'never';
+  const ms = Date.now() - new Date(value).getTime();
+  if (!Number.isFinite(ms)) return 'unknown';
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 10) return 'just now';
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86_400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86_400)}d ago`;
+}
+
+/** Email the user consented to upgrade (legacy v1 accounts); see utils/auth.ts. */
+let legacyConsentEmail: string | null = null;
+
+/** Runs login, handling the one-time legacy-upgrade consent (shown in `errorId`, confirmed by a second submit). */
+async function loginWithConsent(
+  email: string,
+  password: string,
+  deviceName: string | undefined,
+  errorId: string,
+  btn: HTMLButtonElement,
+): Promise<boolean> {
+  try {
+    await login(email, password, deviceName, {
+      allowLegacyUpgrade: legacyConsentEmail === email.toLowerCase(),
+    });
+    legacyConsentEmail = null;
+    return true;
+  } catch (err) {
+    if (err instanceof LegacyUpgradeConsentRequired) {
+      legacyConsentEmail = email.toLowerCase();
+      showError(errorId, err.message);
+      const text = btn.querySelector('.btn-text');
+      if (text) text.textContent = 'Upgrade & Unlock';
+      return false;
+    }
+    throw err;
+  }
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// ─── State ─────────────────────────────────────────────────────────────────────────────────────
+
+let session: ActiveSession | null = null;
+
+// ─── Startup / routing ─────────────────────────────────────────────────────────────────────────
+
+async function init(): Promise<void> {
   showScreen('screen-loading');
-  const storage = await loadFromStorage();
-
-  if (!storage.is_logged_in || !storage.jwt_token) {
-    // Pre-fill device name for registration/login
-    // If we have a saved device_name in storage (e.g. from a previous login), use it.
-    // Otherwise fallback to the browser-detected name.
-    const defaultName = storage.device_name || getDeviceName();
-    el<HTMLInputElement>('reg-device-name').value = defaultName;
-    el<HTMLInputElement>('login-device-name').value = defaultName;
-
-    showScreen('screen-auth');
-    return;
+  const state = await loadState();
+  if (state.token && state.user_id) {
+    const active = await getActiveSession();
+    if (active) return enterMain(active);
+    return showRelogin(
+      state.user_email ?? '',
+      'The vault key is missing on this browser. Enter your master password to unlock it.',
+    );
   }
-
-  // Logged in — but check if master key is still in IndexedDB
-  // (It might be gone if browser storage was cleared)
-  const masterKey = await loadMasterKey();
-  if (!masterKey) {
-    // Pre-fill email for convenience
-    const emailInput = el<HTMLInputElement>('relogin-email');
-    emailInput.value = storage.user_email || '';
-    showScreen('screen-relogin');
-    return;
+  if (state.relogin_email) {
+    return showRelogin(state.relogin_email, state.last_error ?? SESSION_ENDED_MESSAGE);
   }
-
-  // Also clear any stale error from storage
-  if (storage.last_error) {
-    await saveToStorage({ last_error: undefined });
-  }
-
-  showDashboard(storage);
+  showAuth('login');
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DASHBOARD
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function showDashboard(storage: Awaited<ReturnType<typeof loadFromStorage>>) {
-  showScreen('screen-dashboard');
-
-  // Static fields
-  el('user-email-display').textContent = storage.user_email || '';
-  const deviceName = storage.device_name || '—';
-  el('info-device').textContent = deviceName.length > 12
-    ? deviceName.slice(0, 10) + '…' : deviceName;
-
-  await refreshDashboard();
+function showAuth(mode: 'login' | 'register', error?: string, email?: string): void {
+  session = null;
+  const name = defaultDeviceName();
+  for (const id of ['login-device-name', 'reg-device-name']) {
+    const input = el<HTMLInputElement>(id);
+    if (!input.value) input.value = name;
+  }
+  if (email) el<HTMLInputElement>('login-email').value = email;
+  setAuthMode(mode);
+  hideError('login-error');
+  hideError('reg-error');
+  if (error) showError(mode === 'login' ? 'login-error' : 'reg-error', error);
+  showScreen('screen-auth');
 }
 
-/**
- * Refreshes the dynamic parts of the dashboard:
- * - Tab list (live from chrome.tabs)
- * - Window count
- * - Sync status + sync count
- * - Error banner
- *
- * Called on open AND whenever background sends SYNC_COMPLETE.
- */
-async function refreshDashboard() {
-  const storage = await loadFromStorage();
+function setAuthMode(mode: 'login' | 'register'): void {
+  el('btn-show-login').classList.toggle('active', mode === 'login');
+  el('btn-show-register').classList.toggle('active', mode === 'register');
+  el('form-login').classList.toggle('hidden', mode !== 'login');
+  el('form-register').classList.toggle('hidden', mode !== 'register');
+}
 
-  // ── ERROR BANNER ───────────────────────────────────────────────────────────
-  const errorBanner = el('error-banner');
-  if (storage.last_error) {
-    el('error-banner-text').textContent = storage.last_error;
-    errorBanner.classList.remove('hidden');
+let reloginEmail = '';
+
+function showRelogin(email: string, message: string): void {
+  session = null;
+  reloginEmail = email;
+  el('relogin-desc').textContent = message;
+  el('relogin-email-display').textContent = email;
+  el<HTMLInputElement>('relogin-password').value = '';
+  hideError('relogin-error');
+  showScreen('screen-relogin');
+  el('relogin-password').focus();
+}
+
+async function afterLogin(): Promise<void> {
+  const active = await getActiveSession();
+  if (!active) throw new Error('Could not start the session. Please try again.');
+  enterMain(active);
+}
+
+// ─── Login / register / re-login ───────────────────────────────────────────────────────────────
+
+async function handleLogin(e: Event): Promise<void> {
+  e.preventDefault();
+  hideError('login-error');
+  const email = el<HTMLInputElement>('login-email').value.trim();
+  const passwordInput = el<HTMLInputElement>('login-password');
+  const deviceName = el<HTMLInputElement>('login-device-name').value.trim();
+  if (!EMAIL_RE.test(email)) return showError('login-error', 'Enter a valid email address.');
+  if (!passwordInput.value) return showError('login-error', 'Enter your password.');
+
+  const btn = el<HTMLButtonElement>('btn-login');
+  setLoading(btn, true);
+  try {
+    if (!(await loginWithConsent(email, passwordInput.value, deviceName, 'login-error', btn))) return;
+    passwordInput.value = '';
+    await afterLogin();
+  } catch (err) {
+    showError('login-error', errorMessage(err, 'Login failed.'));
+  } finally {
+    setLoading(btn, false);
+  }
+}
+
+async function handleRelogin(e: Event): Promise<void> {
+  e.preventDefault();
+  hideError('relogin-error');
+  const passwordInput = el<HTMLInputElement>('relogin-password');
+  if (!passwordInput.value) return showError('relogin-error', 'Enter your password.');
+  const btn = el<HTMLButtonElement>('btn-relogin');
+  setLoading(btn, true);
+  try {
+    const { device_name } = await loadState();
+    if (!(await loginWithConsent(reloginEmail, passwordInput.value, device_name, 'relogin-error', btn)))
+      return;
+    passwordInput.value = '';
+    await afterLogin();
+  } catch (err) {
+    showError('relogin-error', errorMessage(err, 'Login failed.'));
+  } finally {
+    setLoading(btn, false);
+  }
+}
+
+async function handleReloginSwitch(): Promise<void> {
+  await logout();
+  await patchState({ last_error: undefined });
+  showAuth('login');
+}
+
+function updateStrength(): void {
+  const pw = el<HTMLInputElement>('reg-password').value;
+  const fill = el('reg-strength-fill');
+  const label = el('reg-strength-label');
+  if (!pw) {
+    fill.className = '';
+    label.textContent = `At least ${LIMITS.minPasswordChars} characters`;
+    return;
+  }
+  const s = passwordStrength(pw);
+  fill.className = `level-${s.level}`;
+  label.textContent = s.label;
+}
+
+async function handleRegister(e: Event): Promise<void> {
+  e.preventDefault();
+  hideError('reg-error');
+  const email = el<HTMLInputElement>('reg-email').value.trim();
+  const passwordInput = el<HTMLInputElement>('reg-password');
+  const confirmInput = el<HTMLInputElement>('reg-password-confirm');
+  const password = passwordInput.value;
+  const deviceName = el<HTMLInputElement>('reg-device-name').value.trim();
+
+  if (!EMAIL_RE.test(email)) return showError('reg-error', 'Enter a valid email address.');
+  if (password.length < LIMITS.minPasswordChars) {
+    return showError('reg-error', `Use at least ${LIMITS.minPasswordChars} characters.`);
+  }
+  if (password.length > LIMITS.maxPasswordChars) return showError('reg-error', 'That password is too long.');
+  if (password !== confirmInput.value) return showError('reg-error', 'Passwords do not match.');
+
+  const btn = el<HTMLButtonElement>('btn-register');
+  setLoading(btn, true);
+  try {
+    const result = await register(email, password, deviceName);
+    passwordInput.value = '';
+    confirmInput.value = '';
+    updateStrength();
+    showRecovery(result.recoveryCode, email, result.sessionError);
+  } catch (err) {
+    showError('reg-error', errorMessage(err, 'Registration failed.'));
+  } finally {
+    setLoading(btn, false);
+  }
+}
+
+// ─── Recovery key screen (listeners are attached once, below) ──────────────────────────────────
+
+let pendingRecovery: { code: string; email: string; sessionError?: string } | null = null;
+
+function showRecovery(code: string, email: string, sessionError?: string): void {
+  pendingRecovery = { code, email, sessionError };
+  el('recovery-code-text').textContent = code;
+  el<HTMLInputElement>('recovery-saved-check').checked = false;
+  el<HTMLButtonElement>('btn-recovery-continue').disabled = true;
+  el('btn-copy-recovery').textContent = 'COPY';
+  if (sessionError) {
+    showError(
+      'recovery-session-error',
+      `Your account was created, but this browser could not be set up (${sessionError}). Save the key, then log in.`,
+    );
   } else {
-    errorBanner.classList.add('hidden');
+    hideError('recovery-session-error');
   }
+  showScreen('screen-recovery');
+}
 
-  // ── TAB + WINDOW COUNT ─────────────────────────────────────────────────────
-  const allTabs = await chrome.tabs.query({});
-  const httpTabs = allTabs.filter(t => t.url?.startsWith('http'));
-  const windows = await chrome.windows.getAll();
+async function copyRecovery(): Promise<void> {
+  if (!pendingRecovery) return;
+  const btn = el('btn-copy-recovery');
+  try {
+    await navigator.clipboard.writeText(pendingRecovery.code);
+    btn.textContent = 'COPIED';
+  } catch {
+    btn.textContent = 'FAILED';
+  }
+  setTimeout(() => (btn.textContent = 'COPY'), 2000);
+}
 
-  el('info-tab-count').textContent = httpTabs.length.toString();
-  el('info-window-count').textContent = windows.length.toString();
+function downloadRecovery(): void {
+  if (!pendingRecovery) return;
+  const { code, email } = pendingRecovery;
+  const content = [
+    'VaultTabs Recovery Key',
+    '======================',
+    '',
+    `Account: ${email}`,
+    `Created: ${new Date().toISOString().slice(0, 10)}`,
+    '',
+    `Recovery Key: ${code}`,
+    '',
+    'This key is the only way to recover your data if you forget your password.',
+    'Store it in a password manager or print it, then delete this file.',
+    'The VaultTabs server never sees this key.',
+    '',
+  ].join('\n');
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
+  const a = h('a');
+  a.href = url;
+  a.download = 'vaulttabs-recovery-key.txt';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
-  // ── SYNC STATUS ────────────────────────────────────────────────────────────
+async function finishRecovery(): Promise<void> {
+  const pending = pendingRecovery;
+  pendingRecovery = null;
+  el('recovery-code-text').textContent = '';
+  const active = await getActiveSession();
+  if (active) enterMain(active);
+  else
+    showAuth('login', pending?.sessionError ? 'Account created. Please log in.' : undefined, pending?.email);
+}
+
+// ─── Main screen ───────────────────────────────────────────────────────────────────────────────
+
+type ViewId = 'view-tabs' | 'view-devices' | 'view-settings';
+let currentView: ViewId = 'view-tabs';
+
+function enterMain(active: ActiveSession): void {
+  session = active;
+  el('user-email-display').textContent = active.email;
+  el('settings-email').textContent = active.email;
+  el('info-device').textContent = active.deviceName || '—';
+  el('btn-open-dashboard').classList.toggle('hidden', !DASHBOARD_URL);
+  devicesLoaded = false;
+  showScreen('screen-main');
+  showView('view-tabs');
+}
+
+function showView(view: ViewId): void {
+  currentView = view;
+  for (const btn of document.querySelectorAll<HTMLButtonElement>('.nav-btn')) {
+    btn.classList.toggle('active', btn.dataset.view === view);
+  }
+  for (const id of ['view-tabs', 'view-devices', 'view-settings'] as const) {
+    el(id).classList.toggle('hidden', id !== view);
+  }
+  if (view === 'view-tabs') void refreshTabsView();
+  if (view === 'view-devices' && !devicesLoaded) void loadOtherDevices();
+  if (view === 'view-settings') void renderSettings();
+}
+
+// ─── View: this browser ────────────────────────────────────────────────────────────────────────
+
+function renderStatus(state: LocalState): void {
   const dot = el('status-dot');
   const text = el('status-text');
   const detail = el('status-detail');
   const count = el('sync-count');
+  const banner = el('error-banner');
 
-  if (storage.sync_count) {
-    count.textContent = `↑ ${storage.sync_count}`;
-  }
+  count.classList.toggle('hidden', !state.sync_count);
+  count.textContent = state.sync_count ? `↑ ${state.sync_count}` : '';
+  banner.classList.toggle('hidden', !state.last_error);
+  banner.textContent = state.last_error ?? '';
 
-  if (storage.last_error) {
+  if (state.sync_paused) {
+    dot.className = 'status-dot';
+    text.textContent = 'Sync paused';
+    detail.textContent = 'Resume in Settings';
+  } else if (state.last_error) {
     dot.className = 'status-dot error';
     text.textContent = 'Sync error';
     detail.textContent = 'Will retry automatically';
-  } else if (storage.last_sync_at) {
-    const secondsAgo = Math.round((Date.now() - new Date(storage.last_sync_at).getTime()) / 1000);
-    if (secondsAgo < 10) {
-      dot.className = 'status-dot synced';
-      text.textContent = 'Synced';
-      detail.textContent = 'Just now';
-    } else if (secondsAgo < 60) {
-      dot.className = 'status-dot synced';
-      text.textContent = 'Synced';
-      detail.textContent = `${secondsAgo}s ago`;
-    } else if (secondsAgo < 300) {
-      dot.className = 'status-dot syncing';
-      text.textContent = 'Pending sync';
-      detail.textContent = `Last: ${Math.round(secondsAgo / 60)}m ago`;
-    } else {
-      dot.className = 'status-dot error';
-      text.textContent = 'Sync stalled';
-      detail.textContent = `Last: ${Math.round(secondsAgo / 60)}m ago`;
-    }
+  } else if (state.last_sync_at) {
+    dot.className = 'status-dot synced';
+    text.textContent = 'Synced';
+    detail.textContent = `${timeAgo(state.last_sync_at)} · ${state.last_tab_count ?? 0} tabs`;
   } else {
     dot.className = 'status-dot syncing';
-    text.textContent = 'Awaiting first sync';
-    detail.textContent = 'Open or close a tab to trigger';
+    text.textContent = 'Waiting for first sync';
+    detail.textContent = 'Changes upload a few seconds after you switch pages';
   }
-
-  // ── TAB LIST ───────────────────────────────────────────────────────────────
-  renderTabList(httpTabs);
 }
 
-/**
- * Renders the live tab preview list.
- * Shows up to 12 tabs. Active tab is highlighted.
- * Each tab is a clickable link that focuses that tab.
- */
-function renderTabList(tabs: chrome.tabs.Tab[]) {
+async function refreshTabsView(): Promise<void> {
+  renderStatus(await loadState());
+  const [tabs, windows] = await Promise.all([browser.tabs.query({}), browser.windows.getAll()]);
+  const httpTabs = tabs
+    .filter(t => !t.incognito && isSafeTabUrl(t.url))
+    .sort((a, b) => Number(b.active) - Number(a.active) || a.windowId - b.windowId || a.index - b.index);
+  el('info-tab-count').textContent = String(httpTabs.length);
+  el('info-window-count').textContent = String(windows.filter(w => !w.incognito).length);
+  renderLocalTabs(httpTabs);
+}
+
+function renderLocalTabs(tabs: Browser.tabs.Tab[]): void {
   const list = el('tab-list');
-  const hint = el('tabs-hint');
-  const MAX = 12;
-
-  // Sort: active tab first, then by window + index
-  const sorted = [...tabs].sort((a, b) => {
-    if (a.active && !b.active) return -1;
-    if (!a.active && b.active) return 1;
-    if (a.windowId !== b.windowId) return a.windowId - b.windowId;
-    return a.index - b.index;
-  });
-
-  const visible = sorted.slice(0, MAX);
-  const hidden = sorted.length - visible.length;
-
-  hint.textContent = hidden > 0 ? `+${hidden} more` : '';
-
-  if (visible.length === 0) {
-    list.innerHTML = '<div class="tab-list-empty">No HTTP tabs open</div>';
+  list.replaceChildren();
+  if (tabs.length === 0) {
+    list.append(h('div', { className: 'tab-list-empty', text: 'No web pages open' }));
     return;
   }
-
-  list.innerHTML = '';
-
-  for (const tab of visible) {
-    const item = document.createElement('div');
-    item.className = 'tab-item';
-    item.title = tab.url || '';
-
-    // Favicon
-    const faviconEl = tab.favIconUrl
-      ? (() => {
-        const img = document.createElement('img');
-        img.className = 'tab-favicon';
-        img.src = tab.favIconUrl!;
-        img.onerror = () => { img.replaceWith(makeFallbackFavicon()); };
-        return img;
-      })()
-      : makeFallbackFavicon();
-
-    // Title + URL
-    const info = document.createElement('div');
-    info.className = 'tab-info';
-
-    const title = document.createElement('div');
-    title.className = 'tab-title';
-    title.textContent = tab.title || 'Untitled';
-
-    const url = document.createElement('div');
-    url.className = 'tab-url';
-    // Show just the hostname, not the full URL
-    try { url.textContent = new URL(tab.url || '').hostname; }
-    catch { url.textContent = tab.url || ''; }
-
-    info.appendChild(title);
-    info.appendChild(url);
-
-    item.appendChild(faviconEl);
-    item.appendChild(info);
-
-    // Send to Device button
-    const sendBtn = document.createElement('button');
-    sendBtn.className = 'btn-send-tab';
-    sendBtn.title = 'Send to another device';
-    sendBtn.innerHTML = `
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>
-      </svg>
-    `;
-    sendBtn.onclick = (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      showDevicePicker(tab.url || '');
-    };
-    item.appendChild(sendBtn);
-
-    // Green dot for the active tab
-    if (tab.active) {
-      const dot = document.createElement('div');
-      dot.className = 'tab-active-dot';
-      dot.title = 'Active tab';
-      item.appendChild(dot);
-    }
-
-    // Click → focus that tab
+  const MAX = 200;
+  for (const tab of tabs.slice(0, MAX)) {
+    const url = tab.url as string;
+    const send = h(
+      'button',
+      { className: 'btn-send-tab', title: 'Send to another device', type: 'button' },
+      icon('send'),
+    );
+    send.addEventListener('click', ev => {
+      ev.stopPropagation();
+      openDevicePicker([url], tab.title || hostOf(url));
+    });
+    const item = h(
+      'div',
+      { className: 'tab-item', title: url },
+      localFavicon(tab),
+      h(
+        'div',
+        { className: 'tab-info' },
+        h('div', { className: 'tab-title', text: tab.title || 'Untitled' }),
+        h('div', { className: 'tab-url', text: hostOf(url) }),
+      ),
+      send,
+      tab.active && h('div', { className: 'tab-active-dot', title: 'Active tab' }),
+    );
     item.addEventListener('click', () => {
-      if (tab.id !== undefined) {
-        chrome.tabs.update(tab.id, { active: true });
-        chrome.windows.update(tab.windowId, { focused: true });
-      }
+      if (tab.id !== undefined) void browser.tabs.update(tab.id, { active: true });
+      void browser.windows.update(tab.windowId, { focused: true });
     });
-
-    list.appendChild(item);
+    list.append(item);
   }
-
-  // "X more" footer
-  if (hidden > 0) {
-    const more = document.createElement('div');
-    more.className = 'tab-list-more';
-    more.textContent = `+ ${hidden} more tab${hidden > 1 ? 's' : ''}`;
-    list.appendChild(more);
-  }
+  if (tabs.length > MAX)
+    list.append(h('div', { className: 'tab-list-more', text: `+ ${tabs.length - MAX} more` }));
 }
 
-function makeFallbackFavicon(): HTMLElement {
-  const div = document.createElement('div');
-  div.className = 'tab-favicon-fallback';
-  div.textContent = '○';
-  return div;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// REGISTER
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function handleRegister(e: Event) {
-  e.preventDefault();
-  hideError('reg-error');
-
-  const email = el<HTMLInputElement>('reg-email').value.trim();
-  const password = el<HTMLInputElement>('reg-password').value;
-  const confirm = el<HTMLInputElement>('reg-password-confirm').value;
-  const deviceName = el<HTMLInputElement>('reg-device-name').value.trim() || getDeviceName();
-  const btn = el<HTMLButtonElement>('btn-register');
-
-  if (password !== confirm) { showError('reg-error', 'Passwords do not match.'); return; }
-
-  setLoading(btn, true);
+async function handleSyncNow(): Promise<void> {
+  const btn = el<HTMLButtonElement>('btn-sync-now');
+  btn.disabled = true;
   try {
-    // 1. Generate crypto material
-    const salt = generateSalt();
-    const wrappingKey = await deriveWrappingKey(password, salt);
-    const masterKey = await generateMasterKey();
-    const { encryptedMasterKey, iv: masterKeyIv } = await encryptMasterKey(masterKey, wrappingKey);
-
-    // 2. Generate recovery key (happens client-side, never sent to server plaintext)
-    const recoveryCode = generateRecoveryCode();
-    const recovery = await encryptMasterKeyForRecovery(masterKey, recoveryCode);
-    const recoveryKeyHash = await hashRecoveryCode(recoveryCode);
-
-    // 3. Register account — send both the password-encrypted key AND the recovery-encrypted key
-    const result = await apiRegister({
-      email, password,
-      encrypted_master_key: encryptedMasterKey,
-      master_key_iv: masterKeyIv,
-      salt,
-      // Recovery key fields (server stores encrypted copy, not the code)
-      recovery_encrypted_master_key: recovery.encryptedMasterKey,
-      recovery_key_iv: recovery.iv,
-      recovery_key_salt: recovery.salt,
-      recovery_key_hash: recoveryKeyHash,
-    });
-    if (!result.ok || !result.data) { showError('reg-error', result.error || 'Registration failed.'); return; }
-
-    const { token, user } = result.data;
-
-    // 4. Register/Verify device (Never reuse ID from storage unconditionally)
-    await saveToStorage({ jwt_token: token, user_id: user.id, user_email: user.email });
-    const existing = await loadFromStorage();
-    const finalDeviceName = deviceName || existing.device_name || getDeviceName();
-
-    const fingerprint = await getBrowserFingerprint();
-    const deviceResult = await apiRegisterDevice(finalDeviceName, fingerprint, existing.device_id);
-    if (!deviceResult.ok || !deviceResult.data) {
-      showError('reg-error', 'Account created but device registration failed. Please login.');
-      return;
-    }
-    const deviceId = deviceResult.data.device.id;
-
-    // 5. Persist session
-    await saveToStorage({
-      jwt_token: token, user_id: user.id, user_email: user.email,
-      device_id: deviceId, device_name: finalDeviceName,
-      is_logged_in: true, sync_count: 0,
-    });
-    await saveMasterKey(masterKey);
-
-    // 6. Tell background to start syncing
-    chrome.runtime.sendMessage({ type: 'START_SYNC' });
-
-    // 7. Show recovery key screen BEFORE dashboard
-    //    User must acknowledge they've saved the code
-    showRecoveryScreen(recoveryCode, email);
-
-  } catch (err) {
-    showError('reg-error', err instanceof Error ? err.message : 'Unexpected error.');
-  } finally {
-    setLoading(btn, false);
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RECOVERY KEY SCREEN
-//
-// Shown once after registration. Displays the plaintext recovery code,
-// lets user copy it or download it, and requires a checkbox before continuing.
-// The code is never stored — this is the only time it's visible.
-// ─────────────────────────────────────────────────────────────────────────────
-
-function showRecoveryScreen(recoveryCode: string, email: string) {
-  showScreen('screen-recovery');
-
-  // Display the code
-  el('recovery-code-text').textContent = recoveryCode;
-
-  // Copy button
-  const copyBtn = el('btn-copy-recovery');
-  copyBtn.addEventListener('click', async () => {
-    await navigator.clipboard.writeText(recoveryCode);
-    copyBtn.textContent = 'COPIED';
-    copyBtn.style.color = 'var(--accent)';
-    setTimeout(() => { copyBtn.textContent = 'COPY'; copyBtn.style.color = ''; }, 2000);
-  });
-
-  // Download button — creates a .txt file with the code
-  el('btn-download-recovery').addEventListener('click', () => {
-    const content = [
-      'VaultTabs Recovery Key',
-      '======================',
-      '',
-      `Account: ${email}`,
-      `Date:    ${new Date().toLocaleDateString()}`,
-      '',
-      `Recovery Key: ${recoveryCode}`,
-      '',
-      'IMPORTANT:',
-      '- This is the only way to recover your account if you forget your password.',
-      '- Store this in a password manager, printed document, or secure note.',
-      '- The VaultTabs server does NOT have a copy of this code.',
-      '- Delete this file after storing the key somewhere safe.',
-    ].join('\n');
-
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `vaulttabs-recovery-key-${email.split('@')[0]}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  });
-
-  // Checkbox gates the Continue button
-  const checkbox = el<HTMLInputElement>('recovery-saved-check');
-  const continueBtn = el<HTMLButtonElement>('btn-recovery-continue');
-
-  checkbox.addEventListener('change', () => {
-    continueBtn.disabled = !checkbox.checked;
-  });
-
-  continueBtn.addEventListener('click', async () => {
-    // Proceed to dashboard — sync is already running
-    showDashboard(await loadFromStorage());
-  });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// LOGIN
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function handleLogin(e: Event) {
-  e.preventDefault();
-  hideError('login-error');
-
-  const email = el<HTMLInputElement>('login-email').value.trim();
-  const password = el<HTMLInputElement>('login-password').value;
-  const deviceName = el<HTMLInputElement>('login-device-name').value.trim() || getDeviceName();
-  const btn = el<HTMLButtonElement>('btn-login');
-
-  setLoading(btn, true);
-  try {
-    await doLogin(email, password, 'login-error', deviceName);
-  } finally {
-    setLoading(btn, false);
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RE-LOGIN (session expired — master key missing from IndexedDB)
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function handleRelogin(e: Event) {
-  e.preventDefault();
-  hideError('relogin-error');
-
-  const email = el<HTMLInputElement>('relogin-email').value.trim();
-  const password = el<HTMLInputElement>('relogin-password').value;
-  const btn = el<HTMLButtonElement>('btn-relogin');
-
-  setLoading(btn, true);
-  try {
-    // Relogin implies we already have a device_id in storage
-    const storage = await loadFromStorage();
-    await doLogin(email, password, 'relogin-error', storage.device_name);
-  } finally {
-    setLoading(btn, false);
-  }
-}
-
-/**
- * Shared login logic used by both the login form and re-login form.
- * 1. Call /auth/login → get token + encrypted master key + salt
- * 2. Derive wrapping key from password + salt
- * 3. Decrypt master key locally
- * 4. Register as a device
- * 5. Save everything + show dashboard
- */
-async function doLogin(email: string, password: string, errorElId: string, customDeviceName?: string) {
-  const result = await apiLogin(email, password);
-  if (!result.ok || !result.data) {
-    showError(errorElId, result.error || 'Login failed. Check email and password.');
-    return;
-  }
-
-  const { token, user, crypto } = result.data;
-  if (!crypto) { showError(errorElId, 'Server error: missing crypto data.'); return; }
-
-  let masterKey: CryptoKey;
-  try {
-    const wrappingKey = await deriveWrappingKey(password, crypto.salt);
-    masterKey = await decryptMasterKey(crypto.encrypted_master_key, crypto.master_key_iv, wrappingKey);
+    const request: PopupRequest = { type: 'SYNC_NOW' };
+    const res = (await browser.runtime.sendMessage(request)) as SyncNowResponse | undefined;
+    const state = await loadState();
+    if (state.sync_paused) toast('Syncing is paused.');
+    else if (res?.ok) toast('Synced.');
+    else toast(res?.error ?? 'Sync failed.', true);
   } catch {
-    showError(errorElId, 'Decryption failed. Wrong password?');
-    return;
-  }
-
-  await saveToStorage({ jwt_token: token, user_id: user.id, user_email: user.email });
-
-  // ── Device registration ──────────────────────────────────────────────────
-  // Always register/verify device on login.
-  // This ensures that the device_id in storage belongs to the CURRENT user.
-  const existing = await loadFromStorage();
-  let deviceName = customDeviceName || existing.device_name || getDeviceName();
-
-  const fingerprint = await getBrowserFingerprint();
-  const deviceResult = await apiRegisterDevice(deviceName, fingerprint, existing.device_id);
-  if (!deviceResult.ok || !deviceResult.data) {
-    showError(errorElId, 'Login ok but device registration failed. Try again.');
-    return;
-  }
-  const deviceId = deviceResult.data.device.id;
-  deviceName = deviceResult.data.device.device_name;
-
-  await saveToStorage({
-    jwt_token: token, user_id: user.id, user_email: user.email,
-    device_id: deviceId, device_name: deviceName,
-    is_logged_in: true, sync_count: 0, last_error: undefined,
-  });
-  await saveMasterKey(masterKey);
-
-  chrome.runtime.sendMessage({ type: 'START_SYNC' });
-  showDashboard(await loadFromStorage());
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// LOGOUT
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function handleLogout() {
-  chrome.runtime.sendMessage({ type: 'STOP_SYNC' });
-  await clearStorage();
-  await clearMasterKey();
-  showScreen('screen-auth');
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// EVENT LISTENERS
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Auth tab toggle
-el('btn-show-register').addEventListener('click', () => {
-  el('btn-show-register').classList.add('active');
-  el('btn-show-login').classList.remove('active');
-  el('form-register').classList.remove('hidden');
-  el('form-login').classList.add('hidden');
-});
-el('btn-show-login').addEventListener('click', () => {
-  el('btn-show-login').classList.add('active');
-  el('btn-show-register').classList.remove('active');
-  el('form-login').classList.remove('hidden');
-  el('form-register').classList.add('hidden');
-});
-
-el('form-register').addEventListener('submit', handleRegister);
-el('form-login').addEventListener('submit', handleLogin);
-el('form-relogin').addEventListener('submit', handleRelogin);
-el('btn-logout').addEventListener('click', handleLogout);
-
-// Live updates from background worker
-chrome.runtime.onMessage.addListener((message) => {
-  if (message.type === 'SYNC_COMPLETE') {
-    const dashboard = document.getElementById('screen-dashboard');
-    if (dashboard && !dashboard.classList.contains('hidden')) {
-      refreshDashboard();
-    }
-  }
-
-  if (message.type === 'RESTORE_COMPLETE') {
-    const toast = el('restore-toast');
-    el('restore-toast-text').textContent = `${message.tabCount} tabs restored to desktop`;
-    toast.classList.remove('hidden');
-    setTimeout(() => toast.classList.add('hidden'), 4000);
-    const dashboard = document.getElementById('screen-dashboard');
-    if (dashboard && !dashboard.classList.contains('hidden')) refreshDashboard();
-  }
-});
-
-// ── RENAME DEVICE ────────────────────────────────────────────────────────────
-
-el('stat-device-box').addEventListener('click', async () => {
-  const storage = await loadFromStorage();
-  const input = el<HTMLInputElement>('rename-input');
-  input.value = storage.device_name || '';
-  el('rename-overlay').classList.remove('hidden');
-  hideError('rename-error');
-  input.focus();
-});
-
-el('btn-cancel-rename').addEventListener('click', () => {
-  el('rename-overlay').classList.add('hidden');
-});
-
-el('btn-cancel-device-picker').addEventListener('click', () => {
-  el('device-picker-overlay').classList.add('hidden');
-});
-
-el('btn-save-rename').addEventListener('click', handleRenameDevice);
-
-el('rename-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') handleRenameDevice();
-  if (e.key === 'Escape') el('rename-overlay').classList.add('hidden');
-});
-
-async function handleRenameDevice() {
-  const input = el<HTMLInputElement>('rename-input');
-  const newName = input.value.trim();
-  if (!newName) return;
-
-  const btn = el<HTMLButtonElement>('btn-save-rename');
-  const storage = await loadFromStorage();
-  const deviceId = storage.device_id;
-
-  if (!deviceId) return;
-
-  setLoading(btn, true);
-  hideError('rename-error');
-
-  try {
-    const result = await apiRenameDevice(deviceId, newName);
-    if (!result.ok) {
-      showError('rename-error', result.error || 'Failed to rename device');
-      return;
-    }
-
-    // Update local storage and UI
-    await saveToStorage({ device_name: newName });
-    el('info-device').textContent = newName.length > 7
-      ? newName.slice(0, 6) + '…' : newName;
-    el('rename-overlay').classList.add('hidden');
-
-  } catch (err) {
-    showError('rename-error', 'An unexpected error occurred');
+    toast('Sync failed.', true);
   } finally {
-    setLoading(btn, false);
+    btn.disabled = false;
+    void refreshTabsView();
   }
 }
 
-/** ── SEND TO DEVICE ───────────────────────────────────────────────────────── */
+async function handleSendWindow(): Promise<void> {
+  const tabs = await browser.tabs.query({ currentWindow: true });
+  const urls = tabs
+    .filter(t => !t.incognito)
+    .map(t => t.url)
+    .filter(isSafeTabUrl);
+  if (urls.length === 0) return toast('No web pages in this window.', true);
+  openDevicePicker(urls, `${urls.length} tab${urls.length === 1 ? '' : 's'} from this window`);
+}
 
-async function showDevicePicker(url: string) {
-  if (!url) return;
+// ─── Send to device ────────────────────────────────────────────────────────────────────────────
 
-  const listEl = el('device-picker-list');
-  listEl.innerHTML = '<div class="spinner" style="margin: 20px auto;"></div>';
+let pickerToken = 0;
+
+async function openDevicePicker(urls: string[], label: string): Promise<void> {
+  const token = ++pickerToken;
+  const list = el('device-picker-list');
+  el('device-picker-desc').textContent = label;
+  list.replaceChildren(h('div', { className: 'spinner spinner-center' }));
   el('device-picker-overlay').classList.remove('hidden');
 
-  const result = await apiGetDevices();
-  if (!result.ok || !result.data) {
-    listEl.innerHTML = `<div class="error-msg">${escapeHtml(result.error || 'Failed to load devices')}</div>`;
-    return;
-  }
-
-  const storage = await loadFromStorage();
-  const currentDeviceId = storage.device_id;
-
-  // Filter out the current device
-  userDevices = result.data.devices.filter(d => d.id !== currentDeviceId);
-
-  if (userDevices.length === 0) {
-    listEl.innerHTML = `
-      <div class="tab-list-empty" style="padding: 10px;">
-        No other devices found. Register VaultTabs on another browser to send tabs!
-      </div>
-    `;
-    return;
-  }
-
-  listEl.innerHTML = '';
-  userDevices.forEach(device => {
-    const btn = document.createElement('button');
-    btn.className = 'picker-item';
-    const icon = document.createElement('span');
-    icon.className = 'picker-icon';
-    icon.textContent = '◉';
-    const name = document.createElement('div');
-    name.className = 'picker-name';
-    name.textContent = device.device_name; // textContent: device names are user/server supplied
-    btn.append(icon, name);
-    btn.onclick = () => handleSendToDevice(device.id, url);
-    listEl.appendChild(btn);
-  });
-}
-
-async function handleSendToDevice(targetDeviceId: string, url: string) {
-  const targetDevice = userDevices.find(d => d.id === targetDeviceId);
-  const targetName = targetDevice ? targetDevice.device_name : 'Device';
-
-  renderRestoreOverlay('sending');
-  el('device-picker-overlay').classList.add('hidden');
-
+  let devices: Device[];
   try {
-    const result = await apiCreateRestoreRequest({
-      target_device_id: targetDeviceId,
-      target_url: url
-    });
-
-    if (!result.ok || !result.data) {
-      renderRestoreOverlay('error', { message: result.error || 'Failed to send request' });
-      return;
-    }
-
-    const requestId = result.data.request_id;
-    startRestorePolling(requestId, targetName);
-
+    devices = (await api.devices()).devices.filter(d => d.id !== session?.deviceId);
   } catch (err) {
-    renderRestoreOverlay('error', { message: 'Network error' });
+    if (token !== pickerToken) return;
+    list.replaceChildren(
+      h('div', { className: 'error-msg', text: errorMessage(err, 'Could not load devices.') }),
+    );
+    return;
+  }
+  if (token !== pickerToken) return;
+  if (devices.length === 0) {
+    list.replaceChildren(
+      h('div', {
+        className: 'picker-empty',
+        text: 'No other devices yet. Install VaultTabs in another browser and log in.',
+      }),
+    );
+    return;
+  }
+  list.replaceChildren(
+    ...devices.map(device => {
+      const btn = h(
+        'button',
+        { className: 'picker-item', type: 'button' },
+        h('span', { className: 'picker-icon', text: '◉' }),
+        h('div', { className: 'picker-name', text: device.device_name }),
+      );
+      btn.addEventListener('click', () => void sendToDevice(device, urls));
+      return btn;
+    }),
+  );
+}
+
+function closeDevicePicker(): void {
+  pickerToken++;
+  el('device-picker-overlay').classList.add('hidden');
+}
+
+let pollTimer: ReturnType<typeof setInterval> | undefined;
+
+function stopPolling(): void {
+  clearInterval(pollTimer);
+  pollTimer = undefined;
+}
+
+async function sendToDevice(device: Device, urls: string[]): Promise<void> {
+  closeDevicePicker();
+  if (!session) return;
+  renderSendStatus({ phase: 'sending' });
+  try {
+    const payload = await encryptRestorePayload(
+      { urls: urls.slice(0, LIMITS.maxRestoreUrls) },
+      session.masterKey,
+      {
+        userId: session.userId,
+        targetDeviceId: device.id,
+      },
+    );
+    const created = await api.createRestore({ target_device_id: device.id, ...payload });
+    pollRestore(created.request_id, device.device_name);
+  } catch (err) {
+    renderSendStatus({ phase: 'error', message: errorMessage(err, 'Could not send.') });
   }
 }
 
-function startRestorePolling(requestId: string, deviceName: string) {
-  if (restorePollInterval) clearInterval(restorePollInterval);
-
-  renderRestoreOverlay('waiting', { deviceName });
-
-  const startTime = Date.now();
-  const TIMEOUT = 90_000;
-
-  restorePollInterval = setInterval(async () => {
-    // Timeout check
-    if (Date.now() - startTime > TIMEOUT) {
-      stopRestorePolling();
-      renderRestoreOverlay('error', { message: 'Timed out. Is the other device online?' });
+function pollRestore(requestId: string, deviceName: string): void {
+  stopPolling();
+  renderSendStatus({ phase: 'waiting', deviceName });
+  const started = Date.now();
+  pollTimer = setInterval(async () => {
+    if (Date.now() - started > 90_000) {
+      stopPolling();
+      renderSendStatus({
+        phase: 'error',
+        message: `${deviceName} did not respond. Is that browser open and logged in?`,
+      });
       return;
     }
-
     try {
-      const result = await apiGetRestoreStatus(requestId);
-      if (!result.ok || !result.data) return;
-
-      const req = result.data.request;
-      if (req.status === 'completed') {
-        stopRestorePolling();
-        renderRestoreOverlay('success', { deviceName });
-        setTimeout(() => el('restore-overlay').classList.add('hidden'), 5000);
-      } else if (req.status === 'failed') {
-        stopRestorePolling();
-        renderRestoreOverlay('error', { message: req.error_msg || 'Restore failed on target device' });
-      } else if (req.status === 'expired') {
-        stopRestorePolling();
-        renderRestoreOverlay('error', { message: 'Request expired' });
+      const { request } = await api.restoreStatus(requestId);
+      if (request.status === 'completed') {
+        stopPolling();
+        renderSendStatus({ phase: 'success', deviceName });
+        setTimeout(() => el('restore-overlay').classList.add('hidden'), 3000);
+      } else if (request.status === 'failed') {
+        stopPolling();
+        const code: RestoreErrorCode = request.error_code ?? 'unknown';
+        renderSendStatus({
+          phase: 'error',
+          message: RESTORE_ERROR_MESSAGES[code] ?? RESTORE_ERROR_MESSAGES.unknown,
+        });
+      } else if (request.status === 'expired') {
+        stopPolling();
+        renderSendStatus({
+          phase: 'error',
+          message: 'The request expired before the other browser picked it up.',
+        });
       }
-    } catch (err) {
-      // Ignore polling errors
+    } catch {
+      // Transient; keep polling until the timeout.
     }
   }, 2000);
 }
 
-function stopRestorePolling() {
-  if (restorePollInterval) {
-    clearInterval(restorePollInterval);
-    restorePollInterval = null;
-  }
-}
+type SendStatus =
+  | { phase: 'sending' }
+  | { phase: 'waiting'; deviceName: string }
+  | { phase: 'success'; deviceName: string }
+  | { phase: 'error'; message: string };
 
-function renderRestoreOverlay(phase: 'sending' | 'waiting' | 'success' | 'error', data?: any) {
+function renderSendStatus(status: SendStatus): void {
   const overlay = el('restore-overlay');
   const content = el('restore-status-content');
   overlay.classList.remove('hidden');
+  const close = (label: string) => {
+    const btn = h('button', { className: 'restore-cancel-btn', text: label, type: 'button' });
+    btn.addEventListener('click', () => {
+      stopPolling();
+      overlay.classList.add('hidden');
+    });
+    return btn;
+  };
 
-  if (phase === 'sending') {
-    content.innerHTML = `
-      <div class="restore-spinner"></div>
-      <div class="restore-title">Sending request...</div>
-      <div class="restore-desc">Contacting the backend</div>
-    `;
-  } else if (phase === 'waiting') {
-    content.innerHTML = `
-      <div class="restore-spinner"></div>
-      <div class="restore-title">Waiting for desktop</div>
-      <div class="restore-desc">
-        The extension on <strong>${escapeHtml(data.deviceName)}</strong> will open your tab shortly.
-      </div>
-      <div class="restore-pulse">
-        <div class="restore-dot"></div>
-        <div class="restore-dot" style="animation-delay: 0.2s"></div>
-        <div class="restore-dot" style="animation-delay: 0.4s"></div>
-      </div>
-      <button class="restore-cancel-btn" id="btn-cancel-restore">Cancel</button>
-    `;
-    const cancelBtn = el('btn-cancel-restore');
-    cancelBtn.onclick = () => {
-      stopRestorePolling();
-      overlay.classList.add('hidden');
-    };
-  } else if (phase === 'success') {
-    content.innerHTML = `
-      <div class="restore-success-icon">✓</div>
-      <div class="restore-title">Tab restored!</div>
-      <div class="restore-desc">
-        Your tab is now open on <strong>${escapeHtml(data.deviceName)}</strong>.
-      </div>
-    `;
-  } else if (phase === 'error') {
-    content.innerHTML = `
-      <div class="restore-error-icon">✕</div>
-      <div class="restore-title">Restore failed</div>
-      <div class="restore-desc">${escapeHtml(data.message)}</div>
-      <button class="restore-cancel-btn" id="btn-dismiss-restore">Dismiss</button>
-    `;
-    const dismissBtn = el('btn-dismiss-restore');
-    dismissBtn.onclick = () => {
-      overlay.classList.add('hidden');
-    };
+  switch (status.phase) {
+    case 'sending':
+      content.replaceChildren(
+        h('div', { className: 'restore-spinner' }),
+        h('div', { className: 'restore-title', text: 'Encrypting & sending...' }),
+      );
+      break;
+    case 'waiting':
+      content.replaceChildren(
+        h('div', { className: 'restore-spinner' }),
+        h('div', { className: 'restore-title', text: 'Waiting for device' }),
+        h(
+          'div',
+          { className: 'restore-desc' },
+          'Opening on ',
+          h('strong', { text: status.deviceName }),
+          '...',
+        ),
+        h(
+          'div',
+          { className: 'restore-pulse' },
+          h('div', { className: 'restore-dot' }),
+          h('div', { className: 'restore-dot' }),
+          h('div', { className: 'restore-dot' }),
+        ),
+        close('Close'),
+      );
+      break;
+    case 'success':
+      content.replaceChildren(
+        h('div', { className: 'restore-success-icon', text: '✓' }),
+        h('div', { className: 'restore-title', text: 'Sent' }),
+        h('div', { className: 'restore-desc' }, 'Opened on ', h('strong', { text: status.deviceName }), '.'),
+      );
+      break;
+    case 'error':
+      content.replaceChildren(
+        h('div', { className: 'restore-error-icon', text: '✕' }),
+        h('div', { className: 'restore-title', text: 'Not delivered' }),
+        h('div', { className: 'restore-desc', text: status.message }),
+        close('Dismiss'),
+      );
+      break;
   }
 }
 
-function showToast(text: string) {
-  const toast = el('restore-toast');
-  el('restore-toast-text').innerText = text;
-  toast.classList.remove('hidden');
-  setTimeout(() => toast.classList.add('hidden'), 3000);
+// ─── View: other devices ───────────────────────────────────────────────────────────────────────
+
+interface RemoteDevice {
+  deviceId: string;
+  name: string;
+  lastSeen: string | Date;
+  capturedAt: string | Date;
+  tabs: TabSnapshot[] | null;
+  error?: string;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// START
-// ─────────────────────────────────────────────────────────────────────────────
+let devicesLoaded = false;
+let remoteDevices: RemoteDevice[] = [];
+const expanded = new Set<string>();
 
-init();
+async function decryptRemote(s: SnapshotWithDevice, active: ActiveSession): Promise<RemoteDevice> {
+  const base = {
+    deviceId: s.device_id,
+    name: s.device_name,
+    lastSeen: s.last_seen,
+    capturedAt: s.captured_at,
+  };
+  try {
+    const tabs = await decryptSnapshot(s.encrypted_blob, s.iv, active.masterKey, s.enc_version, {
+      userId: active.userId,
+      deviceId: s.device_id,
+      capturedAt: s.captured_at,
+    });
+    return { ...base, tabs: tabs.filter(t => isSafeTabUrl(t.url)) };
+  } catch {
+    return { ...base, tabs: null, error: 'Could not decrypt this snapshot' };
+  }
+}
+
+async function loadOtherDevices(): Promise<void> {
+  const active = session;
+  if (!active) return;
+  const status = el('devices-status');
+  status.textContent = 'Loading & decrypting...';
+  status.classList.remove('hidden');
+  el('device-list').replaceChildren();
+  try {
+    const { snapshots } = await api.latestSnapshots();
+    const others = snapshots.filter(s => s.device_id !== active.deviceId);
+    remoteDevices = (await Promise.all(others.map(s => decryptRemote(s, active)))).sort(
+      (a, b) => new Date(b.capturedAt).getTime() - new Date(a.capturedAt).getTime(),
+    );
+    devicesLoaded = true;
+    renderOtherDevices();
+  } catch (err) {
+    status.textContent = errorMessage(err, 'Could not load devices.');
+  }
+}
+
+function renderOtherDevices(): void {
+  const query = el<HTMLInputElement>('device-search').value.trim().toLowerCase();
+  const list = el('device-list');
+  const status = el('devices-status');
+  list.replaceChildren();
+
+  if (remoteDevices.length === 0) {
+    status.textContent = 'No other devices have synced yet.';
+    status.classList.remove('hidden');
+    return;
+  }
+
+  let shown = 0;
+  for (const device of remoteDevices) {
+    const tabs = device.tabs ?? [];
+    const matches = query
+      ? tabs.filter(t => t.title.toLowerCase().includes(query) || t.url.toLowerCase().includes(query))
+      : tabs;
+    if (query && matches.length === 0) continue;
+    shown++;
+    list.append(renderDeviceCard(device, matches, Boolean(query)));
+  }
+  status.textContent = shown === 0 ? 'No matching tabs.' : '';
+  status.classList.toggle('hidden', shown > 0);
+}
+
+function renderDeviceCard(device: RemoteDevice, tabs: TabSnapshot[], searching: boolean): HTMLElement {
+  const isOpen = searching || expanded.has(device.deviceId);
+  const total = device.tabs?.length ?? 0;
+  const sub = device.error
+    ? h('div', { className: 'device-sub error', text: device.error })
+    : h('div', {
+        className: 'device-sub',
+        text: `${searching ? `${tabs.length}/${total}` : total} tabs · seen ${timeAgo(device.lastSeen)}`,
+      });
+
+  const head = h(
+    'button',
+    { className: 'device-head', type: 'button', title: `Snapshot from ${timeAgo(device.capturedAt)}` },
+    h('span', { className: 'device-caret', text: '▶' }),
+    h('div', { className: 'device-meta' }, h('div', { className: 'device-name', text: device.name }), sub),
+  );
+  const openAll = h('button', {
+    className: 'btn-chip',
+    text: 'Open all',
+    type: 'button',
+    title: 'Open these tabs in a new window',
+  });
+  openAll.disabled = total === 0;
+  openAll.addEventListener('click', async () => {
+    const n = await openUrlsInNewWindow((device.tabs ?? []).map(t => t.url));
+    if (n === 0) toast('Nothing to open.', true);
+  });
+
+  const card = h(
+    'div',
+    { className: `device-card${isOpen ? ' open' : ''}` },
+    h('div', { className: 'device-head-row' }, head, openAll),
+  );
+  head.addEventListener('click', () => {
+    if (expanded.has(device.deviceId)) expanded.delete(device.deviceId);
+    else expanded.add(device.deviceId);
+    renderOtherDevices();
+  });
+
+  if (isOpen && !device.error) {
+    const list = h('div', { className: 'tab-list' });
+    if (tabs.length === 0) list.append(h('div', { className: 'tab-list-empty', text: 'No tabs' }));
+    for (const tab of tabs) {
+      const item = h(
+        'div',
+        { className: 'tab-item', title: tab.url },
+        letterAvatar(tab.url),
+        h(
+          'div',
+          { className: 'tab-info' },
+          h('div', { className: 'tab-title', text: tab.title || 'Untitled' }),
+          h('div', { className: 'tab-url', text: hostOf(tab.url) }),
+        ),
+        tab.pinned && h('span', { className: 'pin-badge', text: 'PIN' }),
+      );
+      item.addEventListener('click', () => {
+        if (isSafeTabUrl(tab.url)) void browser.tabs.create({ url: tab.url });
+      });
+      list.append(item);
+    }
+    card.append(h('div', { className: 'device-body' }, list));
+  }
+  return card;
+}
+
+// ─── View: settings ────────────────────────────────────────────────────────────────────────────
+
+const MAX_EXCLUDED_DOMAINS = 500;
+
+async function renderSettings(): Promise<void> {
+  const state = await loadState();
+  el<HTMLInputElement>('setting-pause').checked = Boolean(state.sync_paused);
+  renderDomainList(state.excluded_domains ?? []);
+}
+
+function renderDomainList(domains: string[]): void {
+  const list = el('domain-list');
+  list.replaceChildren();
+  if (domains.length === 0) {
+    list.append(h('li', { className: 'domain-empty', text: 'No domains excluded.' }));
+    return;
+  }
+  for (const domain of domains) {
+    const remove = h('button', {
+      className: 'domain-remove',
+      text: '✕',
+      title: `Remove ${domain}`,
+      type: 'button',
+    });
+    remove.addEventListener('click', async () => {
+      const { excluded_domains = [] } = await loadState();
+      const next = excluded_domains.filter(d => d !== domain);
+      await patchState({ excluded_domains: next });
+      renderDomainList(next);
+    });
+    list.append(h('li', {}, h('span', { text: domain }), remove));
+  }
+}
+
+async function handleAddDomain(e: Event): Promise<void> {
+  e.preventDefault();
+  hideError('domain-error');
+  const input = el<HTMLInputElement>('domain-input');
+  const domain = normalizeDomainInput(input.value);
+  if (!domain) return showError('domain-error', 'Enter a domain like bank.com.');
+  const { excluded_domains = [] } = await loadState();
+  if (excluded_domains.includes(domain)) return showError('domain-error', `${domain} is already excluded.`);
+  if (excluded_domains.length >= MAX_EXCLUDED_DOMAINS) return showError('domain-error', 'Too many domains.');
+  const next = [...excluded_domains, domain].sort();
+  await patchState({ excluded_domains: next });
+  input.value = '';
+  renderDomainList(next);
+}
+
+async function handleLogout(): Promise<void> {
+  stopPolling();
+  await logout();
+  showAuth('login');
+}
+
+// ─── Rename device ─────────────────────────────────────────────────────────────────────────────
+
+function openRename(): void {
+  el<HTMLInputElement>('rename-input').value = session?.deviceName ?? '';
+  hideError('rename-error');
+  el('rename-overlay').classList.remove('hidden');
+  el('rename-input').focus();
+}
+
+async function handleRename(e: Event): Promise<void> {
+  e.preventDefault();
+  if (!session) return;
+  const name = el<HTMLInputElement>('rename-input').value.trim();
+  if (!name) return showError('rename-error', 'Enter a name.');
+  if (name.length > LIMITS.maxDeviceNameChars) return showError('rename-error', 'That name is too long.');
+  const btn = el<HTMLButtonElement>('btn-save-rename');
+  setLoading(btn, true);
+  hideError('rename-error');
+  try {
+    const { device } = await api.renameDevice(session.deviceId, name);
+    await patchState({ device_name: device.device_name });
+    session = { ...session, deviceName: device.device_name };
+    el('info-device').textContent = device.device_name;
+    el('rename-overlay').classList.add('hidden');
+  } catch (err) {
+    showError('rename-error', errorMessage(err, 'Could not rename the device.'));
+  } finally {
+    setLoading(btn, false);
+  }
+}
+
+// ─── Wiring (runs once) ────────────────────────────────────────────────────────────────────────
+
+el('btn-show-login').addEventListener('click', () => setAuthMode('login'));
+el('btn-show-register').addEventListener('click', () => setAuthMode('register'));
+el('form-login').addEventListener('submit', e => void handleLogin(e));
+el('form-register').addEventListener('submit', e => void handleRegister(e));
+el('reg-password').addEventListener('input', updateStrength);
+el('form-relogin').addEventListener('submit', e => void handleRelogin(e));
+el('btn-relogin-switch').addEventListener('click', () => void handleReloginSwitch());
+
+el('btn-copy-recovery').addEventListener('click', () => void copyRecovery());
+el('btn-download-recovery').addEventListener('click', downloadRecovery);
+el<HTMLInputElement>('recovery-saved-check').addEventListener('change', e => {
+  el<HTMLButtonElement>('btn-recovery-continue').disabled = !(e.target as HTMLInputElement).checked;
+});
+el('btn-recovery-continue').addEventListener('click', () => void finishRecovery());
+
+for (const btn of document.querySelectorAll<HTMLButtonElement>('.nav-btn')) {
+  btn.addEventListener('click', () => showView(btn.dataset.view as ViewId));
+}
+el('btn-sync-now').addEventListener('click', () => void handleSyncNow());
+el('btn-send-window').addEventListener('click', () => void handleSendWindow());
+el('stat-device-box').addEventListener('click', openRename);
+el('form-rename').addEventListener('submit', e => void handleRename(e));
+el('btn-cancel-rename').addEventListener('click', () => el('rename-overlay').classList.add('hidden'));
+el('btn-cancel-device-picker').addEventListener('click', closeDevicePicker);
+
+el('device-search').addEventListener('input', renderOtherDevices);
+el('btn-refresh-devices').addEventListener('click', () => void loadOtherDevices());
+
+el<HTMLInputElement>('setting-pause').addEventListener('change', e => {
+  void patchState({ sync_paused: (e.target as HTMLInputElement).checked });
+});
+el('form-domain').addEventListener('submit', e => void handleAddDomain(e));
+el('btn-open-dashboard').addEventListener('click', () => {
+  if (DASHBOARD_URL) void browser.tabs.create({ url: DASHBOARD_URL });
+});
+el('btn-logout').addEventListener('click', () => void handleLogout());
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  for (const id of ['rename-overlay', 'device-picker-overlay']) el(id).classList.add('hidden');
+  pickerToken++;
+});
+
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  // Session ended elsewhere (401 from the server, or logout in another popup).
+  if (changes.token && !changes.token.newValue && currentScreen === 'screen-main') {
+    stopPolling();
+    void init();
+    return;
+  }
+  if (currentScreen === 'screen-main' && currentView === 'view-tabs') {
+    const keys: (keyof LocalState)[] = [
+      'last_sync_at',
+      'last_error',
+      'sync_count',
+      'sync_paused',
+      'last_tab_count',
+    ];
+    if (keys.some(k => k in changes)) void loadState().then(renderStatus);
+  }
+});
+
+browser.runtime.onMessage.addListener((message: unknown) => {
+  if (!isBackgroundBroadcast(message)) return;
+  if (message.type === 'RESTORE_COMPLETE')
+    toast(`Opened ${message.tabCount} tab${message.tabCount === 1 ? '' : 's'} from another device`);
+  if (message.type === 'SYNC_COMPLETE' && currentScreen === 'screen-main' && currentView === 'view-tabs') {
+    void refreshTabsView();
+  }
+});
+
+setInterval(() => {
+  if (currentScreen === 'screen-main' && currentView === 'view-tabs') void loadState().then(renderStatus);
+}, 15_000);
+
+updateStrength();
+void init();

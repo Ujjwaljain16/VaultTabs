@@ -1,412 +1,428 @@
-// The background service worker manages event-driven syncing of tabs to the VaultTabs backend.
-//   Uses a debounce mechanism and periodic fallback alarms to optimize network and CPU usage
+/**
+ * Background script: uploads encrypted tab snapshots and executes restore requests.
+ *
+ * Sync: tab/window events mark the state dirty and (re)start a 3 s debounce timer; a periodic
+ * alarm is the fallback for when the MV3 service worker was suspended mid-debounce. Uploads are
+ * skipped when the normalized tab list hash equals the last uploaded one (persisted per
+ * user+device, so a worker restart does not re-upload).
+ *
+ * Restore: an SSE stream (GET /restore/stream) delivers requests; reconnects use exponential
+ * backoff with jitter plus an alarm, and GET /restore/pending is polled on (re)connect and by
+ * the fallback alarm so nothing is missed while disconnected.
+ */
 
-import { encryptSnapshot, decryptSnapshot, TabSnapshot } from '../utils/crypto';
-import { loadFromStorage, saveToStorage, loadMasterKey } from '../utils/storage';
-import { apiUploadSnapshot, apiHeartbeat, apiGetPendingRestore, apiCompleteRestore, apiConnectRestoreStream, apiRegisterDevice, getDeviceName } from '../utils/api';
-import { getBrowserFingerprint } from '../utils/fingerprint';
+import {
+  LIMITS,
+  type PendingRestoreDetail,
+  type PendingRestoreResponse,
+  type RestoreErrorCode,
+  type TabSnapshot,
+} from '@vaulttabs/shared';
+import { decryptRestorePayload, decryptSnapshot, encryptSnapshot, sha256Hex } from '@vaulttabs/shared/crypto';
+import { browser } from 'wxt/browser';
+import { defineBackground } from 'wxt/utils/define-background';
+import { api, ApiRequestError, errorMessage, defaultDeviceName } from '../utils/api';
+import type { BackgroundBroadcast, SyncNowResponse } from '../utils/messages';
+import { isPopupRequest } from '../utils/messages';
+import { readSse } from '../utils/sse';
+import {
+  getActiveSession,
+  loadState,
+  migrateLegacyState,
+  patchState,
+  setDeviceId,
+  type ActiveSession,
+  type StateKey,
+} from '../utils/storage';
+import { normalizeForHash, openSnapshotWindows, openUrlsInNewWindow, syncableTabs } from '../utils/tabs';
 
-
-const ALARM_DEBOUNCE = 'vaulttabs-debounce';   // Fires 3s after last tab event
-const ALARM_FALLBACK = 'vaulttabs-fallback';   // Fires every 3 minutes as safety net
-const ALARM_RECONNECT = 'vaulttabs-reconnect';  // Fires if SSE drops
-
-const DEBOUNCE_SECONDS = 3;
+const ALARM_FALLBACK = 'vaulttabs-fallback';
+const ALARM_RECONNECT = 'vaulttabs-reconnect';
+const DEBOUNCE_MS = 3_000;
 const FALLBACK_MINUTES = 3;
-const RECONNECT_SECONDS = 5;               
-const MAX_SYNC_AGE_MS = FALLBACK_MINUTES * 60 * 1000;
+const RECONNECT_BASE_MS = 5_000;
+const RECONNECT_MAX_MS = 60_000;
+/** Chrome clamps alarm delays to >= 30 s. */
+const MIN_ALARM_MINUTES = 0.5;
 
-export default defineBackground(() => {
-  console.log('[VaultTabs] Background service worker started');
-  (async () => {
-    const storage = await loadFromStorage();
-    if (storage.is_logged_in && storage.master_key_stored) {
-      const key = await loadMasterKey();
-      if (!key) {
-        console.warn('[VaultTabs] Master key missing from IndexedDB after restart → forcing re-login');
-        // Clear auth state so popup shows login form
-        await saveToStorage({ is_logged_in: false, last_error: 'Session expired. Please log in again.' });
-      } else {
-        console.log('[VaultTabs] Master key found — session restored');
-        // Sync immediately on startup so data is fresh
-        await performSync('startup');
-        setupRestoreStream();
-      }
-    }
-  })();
+const log = (...args: unknown[]) => {
+  if (import.meta.env.DEV) console.warn('[VaultTabs]', ...args);
+};
 
-  let lastUploadedHash: string | null = null;
-  let isDirty = false;
+function broadcast(message: BackgroundBroadcast): void {
+  // Rejects when no popup is open.
+  browser.runtime.sendMessage(message).catch(() => {});
+}
 
-  chrome.alarms.create(ALARM_FALLBACK, { periodInMinutes: FALLBACK_MINUTES });
+export default defineBackground({
+  // Firefox (MV2): keep the page alive so the restore stream stays connected.
+  persistent: true,
+  main() {
+    // ─── Sync ───────────────────────────────────────────────────────────────────────────────────
 
-  chrome.tabs.onCreated.addListener(() => {
-    markDirty('tab created');
-  });
-  chrome.tabs.onRemoved.addListener(() => {
-    markDirty('tab removed');
-  });
-  chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
-    if (changeInfo.url || changeInfo.title) {
-      markDirty('tab updated');
-    }
-  });
-  chrome.tabs.onMoved.addListener(() => {
-    markDirty('tab moved');
-  });
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+    let syncChain: Promise<void> = Promise.resolve();
+    let queuedSync: Promise<void> | null = null;
+    let queuedForce = false;
 
-  chrome.tabs.onAttached.addListener(() => markDirty('tab attached'));
-  chrome.tabs.onDetached.addListener(() => markDirty('tab detached'));
-
-  chrome.windows.onCreated.addListener(() => markDirty('window created'));
-  chrome.windows.onRemoved.addListener(() => markDirty('window removed'));
-
-  // NOTE: We intentionally do NOT listen to onActivated (tab focus changes).
-  // Switching which tab is active doesn't change the data we care about
-  // (URLs, titles, open/closed state). Listening to it would cause unnecessary
-  // debounce resets every time the user clicks a tab.
-  chrome.alarms.onAlarm.addListener(async (alarm) => {
-
-    if (alarm.name === ALARM_DEBOUNCE) {
-      // Debounce timer expired enough time has passed since the last tab event.
-      // Now actually do the sync.
-      console.log('[VaultTabs] Debounce complete → syncing');
-      await performSync('debounce');
+    function markDirty(): void {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => void requestSync('debounce').catch(() => {}), DEBOUNCE_MS);
     }
 
-    if (alarm.name === ALARM_FALLBACK) {
-      const storage = await loadFromStorage();
-      const lastSync = storage.last_sync_at ? new Date(storage.last_sync_at).getTime() : 0;
-      const timeSinceSync = Date.now() - lastSync;
-      if (isDirty || timeSinceSync > MAX_SYNC_AGE_MS) {
-        console.log(`[VaultTabs] Fallback alarm → syncing`);
-        await performSync('fallback');
-      }
-      setupRestoreStream();
+    /**
+     * Syncs run one at a time. Requests made while one is running coalesce into a single
+     * follow-up run (forced if any of them asked for it).
+     */
+    function requestSync(trigger: string, force = false): Promise<void> {
+      queuedForce ||= force;
+      if (queuedSync) return queuedSync;
+      const run = syncChain.then(() => {
+        const f = queuedForce;
+        queuedForce = false;
+        queuedSync = null;
+        return performSync(trigger, f);
+      });
+      queuedSync = run;
+      syncChain = run.catch(() => {});
+      return run;
     }
 
-    if (alarm.name === ALARM_RECONNECT) {
-      setupRestoreStream();
-    }
-  });
+    async function performSync(trigger: string, force: boolean): Promise<void> {
+      const session = await getActiveSession();
+      if (!session) return;
+      const state = await loadState();
+      if (state.sync_paused) return;
 
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message.type === 'START_SYNC') {
-      console.log('[VaultTabs] Login detected → immediate sync');
-      lastUploadedHash = null;
-      isDirty = true;
-      performSync('login');
-    }
-
-    if (message.type === 'STOP_SYNC') {
-      console.log('[VaultTabs] Logout detected → clearing alarms');
-      chrome.alarms.clear(ALARM_DEBOUNCE);
-      chrome.alarms.clear(ALARM_RECONNECT);
-      isStreamActive = false;
-      lastUploadedHash = null;
-      isDirty = false;
-    }
-  });
-
-  function markDirty(reason: string) {
-    isDirty = true;
-    console.log(`[VaultTabs] Tab change (${reason}) → debounce reset`);
-    chrome.alarms.create(ALARM_DEBOUNCE, {
-      delayInMinutes: DEBOUNCE_SECONDS / 60,
-    });
-  }
-
-  // PERFORM SYNC the actual work
-  // Called by the debounce alarm or the fallback alarm.
-  // Steps:
-  //   1. Auth check
-  //   2. Read tabs
-  //   3. Hash comparison (skip if unchanged)
-  //   4. Encrypt
-  //   5. Upload
-
-  async function performSync(trigger: string) {
-    try {
-      const storage = await loadFromStorage();
-      if (!storage.is_logged_in || !storage.jwt_token || !storage.device_id) {
-        console.log('[VaultTabs] Not logged in — skipping sync');
-        isDirty = false;
-        return;
-      }
-      const masterKey = await loadMasterKey();
-      if (!masterKey) {
-        console.warn('[VaultTabs] Master key missing — user may need to re-login');
-        return;
-      }
-
-    
-      const chromeTabs = await chrome.tabs.query({});
-
-      const tabs: TabSnapshot[] = chromeTabs
-        // Never capture private/incognito tabs (only relevant if the user enabled the extension there)
-        .filter(tab => !tab.incognito)
-        .filter(tab => tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://')))
-        .map(tab => ({
-          id: tab.id ?? 0,
-          url: tab.url ?? '',
-          title: tab.title ?? 'Untitled',
-          favIconUrl: tab.favIconUrl,
-          windowId: tab.windowId,
-          index: tab.index,
-          active: tab.active,
-          pinned: tab.pinned,
-        }));
-
+      const tabs = syncableTabs(await browser.tabs.query({}), state.excluded_domains ?? []);
       if (tabs.length === 0) {
-        console.log('[VaultTabs] No HTTP tabs open — skipping sync');
-        isDirty = false;
+        // Also protects against uploading an empty snapshot while the browser shuts down.
+        log(`no syncable tabs, skipping (${trigger})`);
         return;
       }
-      const serialized = JSON.stringify(tabs);
-      const currentHash = await hashString(serialized);
-
-      if (currentHash === lastUploadedHash) {
-        console.log(`[VaultTabs] Hash unchanged — skipping upload (trigger: ${trigger})`);
-        isDirty = false;
-        return;
-      }
-
-      console.log(`[VaultTabs] Hash changed — uploading ${tabs.length} tabs (trigger: ${trigger})`);
-
-      const capturedAt = new Date().toISOString();
-      const { encryptedBlob, iv } = await encryptSnapshot(tabs, masterKey);
-
-      const result = await apiUploadSnapshot({
-        device_id: storage.device_id,
-        captured_at: capturedAt,
-        iv,
-        encrypted_blob: encryptedBlob,
-      });
-
-      if (!result.ok) {
-        console.error('[VaultTabs] Upload failed:', result.error);
-
-        if (result.error?.includes('This device does not belong to your account')) {
-          console.warn('[VaultTabs] Device identity mismatch — attempting auto-recovery...');
-          const fingerprint = await getBrowserFingerprint();
-          const deviceName = storage.device_name || getDeviceName();
-          const regResult = await apiRegisterDevice(deviceName, fingerprint);
-
-          if (regResult.ok && regResult.data) {
-            const newId = regResult.data.device.id;
-            console.log('[VaultTabs] Device identity successfully recovered:', newId);
-            await saveToStorage({ device_id: newId });
-          }
-        }
+      const hash = await sha256Hex(normalizeForHash(tabs));
+      const last = state.last_upload;
+      if (
+        !force &&
+        last &&
+        last.user_id === session.userId &&
+        last.device_id === session.deviceId &&
+        last.hash === hash
+      ) {
         return;
       }
 
-      lastUploadedHash = currentHash;
-      isDirty = false;
-
-      const newCount = (storage.sync_count ?? 0) + 1;
-      await saveToStorage({
-        last_sync_at: capturedAt,
-        last_tab_count: tabs.length,
-        sync_count: newCount,
-        last_error: undefined,
-      });
-
-      await apiHeartbeat(storage.device_id);
-
-      console.log(`[VaultTabs] Synced ${tabs.length} tabs at ${capturedAt} (trigger: ${trigger}, total: ${newCount})`);
-
-      chrome.runtime.sendMessage({
-        type: 'SYNC_COMPLETE',
-        tabCount: tabs.length,
-        capturedAt,
-        syncCount: newCount,
-      }).catch(() => { });
-
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
-      console.error('[VaultTabs] Sync error:', errorMsg);
-      await saveToStorage({ last_error: errorMsg }).catch(() => { });
-    }
-  }
-
-  // SERVER-SENT EVENTS (SSE) STREAMING
-
-  let isStreamActive = false;
-
-  async function setupRestoreStream() {
-    if (isStreamActive) return;
-
-    const storage = await loadFromStorage();
-    if (!storage.is_logged_in || !storage.jwt_token || !storage.device_id) return;
-
-    console.log('[VaultTabs] Connecting to SSE Restore Stream...');
-    isStreamActive = true;
-
-    apiConnectRestoreStream(
-      storage.device_id,
-      async (data) => {
-        if (data.pending && data.request) {
-          console.log(`[VaultTabs] SSE event: Restore request received: ${data.request.id}`);
-          await handleIncomingRestore(data.request);
-        }
-      },
-      (error) => {
-        isStreamActive = false;
-        if (error) {
-          console.error('[VaultTabs] SSE Stream error:', error.message);
-        } else {
-          console.log('[VaultTabs] SSE Stream closed gracefully.');
-        }
-
-        // 1. Fast reconnect using setTimeout (works as long as SW is awake)
-        setTimeout(() => {
-          setupRestoreStream();
-        }, RECONNECT_SECONDS * 1000);
-
-        // 2. Fallback reconnect using Chrome Alarms (if SW happens to suspend)
-        // Note: Chrome rounds delays < 1 min to 1 min in production
-        chrome.alarms.create(ALARM_RECONNECT, { delayInMinutes: Math.max(1, RECONNECT_SECONDS / 60) });
-      }
-    );
-  }
-
-  // Handle individual incoming restore request
-  async function handleIncomingRestore(req: any) {
-    try {
-      // Load master key
-      const masterKey = await loadMasterKey();
-      if (!masterKey) {
-        await apiCompleteRestore(req.id, 'failed', 'Master key not available — please re-login');
-        return;
-      }
-
-      // Decrypt the snapshot
-      let tabs: TabSnapshot[];
       try {
-        tabs = await decryptSnapshot(req.encrypted_blob, req.snapshot_iv, masterKey);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Decryption failed';
-        console.error('[VaultTabs] Restore decrypt failed:', msg);
-        await apiCompleteRestore(req.id, 'failed', msg);
-        return;
-      }
-
-      if (tabs.length === 0) {
-        await apiCompleteRestore(req.id, 'failed', 'Snapshot contains no tabs');
-        return;
-      }
-
-      // Open tabs (either one specific URL or the whole snapshot)
-      try {
-        await openRestoredTabs(tabs, req.target_url);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Restore failed';
-        console.error('[VaultTabs] Restore refused:', msg);
-        await apiCompleteRestore(req.id, 'failed', msg);
-        return;
-      }
-
-      // Mark completed on backend
-      await apiCompleteRestore(req.id, 'completed');
-
-      console.log(`[VaultTabs] Restored ${tabs.length} tabs from snapshot ${req.snapshot_id}`);
-
-      // Notify popup
-      chrome.runtime.sendMessage({
-        type: 'RESTORE_COMPLETE',
-        tabCount: tabs.length,
-      }).catch(() => { });
-
-    } catch (err) {
-      console.error('[VaultTabs] incoming restore error:', err);
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // OPEN RESTORED TABS
-  //
-  // Opens tabs from a snapshot in an organised way:
-  //   - Groups tabs by their original windowId
-  //   - Creates one new window per group (preserving window layout)
-  //   - Opens pinned tabs first within each window
-  //   - Sets the originally-active tab as active
-  //
-  // WHY GROUP BY WINDOW?
-  // If the user had 3 windows with different projects open,
-  // restoring into one window would be a mess.
-  // We recreate the original window structure.
-  // ─────────────────────────────────────────────────────────────────────────────
-
-  // Only http(s) URLs are ever opened. Snapshot contents are authenticated (AES-GCM) but we
-  // still refuse anything else (javascript:, file:, chrome:, data:) as defence in depth.
-  function isOpenableUrl(url: string | undefined): url is string {
-    return typeof url === 'string' && /^https?:\/\//i.test(url);
-  }
-
-  async function openRestoredTabs(allTabs: TabSnapshot[], targetUrl?: string) {
-    const tabs = allTabs.filter(t => isOpenableUrl(t.url));
-
-    if (targetUrl) {
-      // "Send tab to device": target_url arrives from the server in PLAINTEXT (it is not covered
-      // by the snapshot's encryption and is NOT necessarily part of the snapshot). A compromised
-      // server could therefore ask us to open any http(s) page. We at least refuse other schemes.
-      if (!isOpenableUrl(targetUrl)) {
-        throw new Error('Requested URL is not http(s) - refusing to open it');
-      }
-      console.log(`[VaultTabs] Single site restore: ${targetUrl}`);
-
-      await chrome.windows.create({
-        url: targetUrl,
-        focused: true,
-      });
-      return;
-    }
-
-    if (tabs.length === 0) {
-      throw new Error('Snapshot contains no restorable http(s) tabs');
-    }
-
-    // Group tabs by original windowId
-    const windowGroups = new Map<number, TabSnapshot[]>();
-    for (const tab of tabs) {
-      if (!windowGroups.has(tab.windowId)) windowGroups.set(tab.windowId, []);
-      windowGroups.get(tab.windowId)!.push(tab);
-    }
-
-    for (const [, windowTabs] of windowGroups) {
-      // Sort: pinned first, then by original index
-      const sorted = [...windowTabs].sort((a, b) => {
-        if (a.pinned && !b.pinned) return -1;
-        if (!a.pinned && b.pinned) return 1;
-        return a.index - b.index;
-      });
-
-      // Create a new window with the first tab
-      const firstTab = sorted[0];
-      const newWindow = await chrome.windows.create({
-        url: firstTab.url,
-        focused: true,
-      });
-
-      const newWindowId = newWindow.id!;
-
-      for (let i = 1; i < sorted.length; i++) {
-        await chrome.tabs.create({
-          windowId: newWindowId,
-          url: sorted[i].url,
-          pinned: sorted[i].pinned,
-          active: sorted[i].active,
+        const capturedAt = await upload(session, tabs);
+        const syncCount = (state.sync_count ?? 0) + 1;
+        await patchState({
+          last_sync_at: capturedAt,
+          last_tab_count: tabs.length,
+          sync_count: syncCount,
+          last_error: undefined,
+          last_upload: { user_id: session.userId, device_id: session.deviceId, hash },
         });
+        log(`uploaded ${tabs.length} tabs (${trigger})`);
+        broadcast({ type: 'SYNC_COMPLETE', tabCount: tabs.length, capturedAt });
+      } catch (err) {
+        if (err instanceof ApiRequestError && err.sessionEnded) return; // handled centrally
+        const message = errorMessage(err, 'Sync failed.');
+        console.warn('[VaultTabs] sync failed:', message);
+        await patchState({ last_error: message });
+        broadcast({ type: 'SYNC_FAILED', error: message });
+        throw err;
       }
     }
-  }
 
-  async function hashString(input: string): Promise<string> {
-    const bytes = new TextEncoder().encode(input);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', bytes);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  }
+    /** Encrypts and uploads; re-registers the device once if the server rejects it. */
+    async function upload(session: ActiveSession, tabs: TabSnapshot[]): Promise<string> {
+      let deviceId = session.deviceId;
+      for (let attempt = 0; ; attempt++) {
+        const capturedAt = new Date().toISOString();
+        const encrypted = await encryptSnapshot(tabs, session.masterKey, {
+          userId: session.userId,
+          deviceId,
+          capturedAt,
+        });
+        if (encrypted.encrypted_blob.length > LIMITS.maxSnapshotBlobChars) {
+          throw new Error('Too many open tabs to sync in one snapshot.');
+        }
+        try {
+          await api.uploadSnapshot({ device_id: deviceId, captured_at: capturedAt, ...encrypted });
+          return capturedAt;
+        } catch (err) {
+          if (attempt === 0 && isDeviceRejected(err)) {
+            deviceId = await reRegisterDevice(session);
+            session = { ...session, deviceId };
+            continue;
+          }
+          throw err;
+        }
+      }
+    }
 
+    /** 403: the device id belongs to someone else; 404: the device was removed. */
+    function isDeviceRejected(err: unknown): boolean {
+      return err instanceof ApiRequestError && (err.status === 403 || err.status === 404);
+    }
+
+    async function reRegisterDevice(session: ActiveSession): Promise<string> {
+      log('device rejected by server, registering a new one');
+      const { device } = await api.registerDevice({ device_name: session.deviceName || defaultDeviceName() });
+      await setDeviceId(session.userId, device.id);
+      await patchState({ device_name: device.device_name });
+      // The stream was opened for the old device id.
+      restartStream();
+      return device.id;
+    }
+
+    async function heartbeat(): Promise<void> {
+      const session = await getActiveSession();
+      if (!session) return;
+      try {
+        await api.heartbeat(session.deviceId);
+      } catch (err) {
+        if (isDeviceRejected(err)) await reRegisterDevice(session).catch(() => {});
+      }
+    }
+
+    // ─── Restore stream ─────────────────────────────────────────────────────────────────────────
+
+    let stream: AbortController | null = null;
+    let reconnectAttempt = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let streamConnected = false;
+    const handledRequests = new Set<string>();
+
+    function stopStream(): void {
+      clearTimeout(reconnectTimer);
+      void browser.alarms.clear(ALARM_RECONNECT);
+      stream?.abort();
+      stream = null;
+      streamConnected = false;
+    }
+
+    function restartStream(): void {
+      stopStream();
+      reconnectAttempt = 0;
+      void ensureStream();
+    }
+
+    function scheduleReconnect(): void {
+      const exp = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** reconnectAttempt);
+      const delay = exp / 2 + Math.random() * (exp / 2); // "equal jitter"
+      reconnectAttempt++;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => void ensureStream(), delay);
+      // If the worker is suspended the timer is lost; the alarm wakes it up.
+      void browser.alarms.create(ALARM_RECONNECT, {
+        delayInMinutes: Math.max(MIN_ALARM_MINUTES, delay / 60_000),
+      });
+    }
+
+    async function ensureStream(): Promise<void> {
+      if (stream) return; // never two concurrent streams
+      const controller = new AbortController();
+      stream = controller;
+      try {
+        const session = await getActiveSession();
+        if (!session || controller.signal.aborted) return;
+        const response = await api.restoreStream(session.deviceId, controller.signal);
+        if (!response.body) throw new Error('Stream has no body');
+        streamConnected = true;
+        log('restore stream connected');
+        void pollPending(session);
+        let reset = false;
+        await readSse(
+          response.body,
+          {
+            onEvent: data => {
+              if (!reset) {
+                reset = true;
+                reconnectAttempt = 0;
+              }
+              let parsed: PendingRestoreResponse;
+              try {
+                parsed = JSON.parse(data) as PendingRestoreResponse;
+              } catch {
+                return;
+              }
+              if (parsed.pending && parsed.request) void handleRestore(parsed.request);
+            },
+            onComment: () => {
+              if (!reset) {
+                reset = true;
+                reconnectAttempt = 0;
+              }
+              // Any extension API call resets the MV3 service worker idle timer.
+              void browser.runtime.getPlatformInfo();
+            },
+          },
+          controller.signal,
+        );
+      } catch (err) {
+        if (!controller.signal.aborted) console.warn('[VaultTabs] restore stream error:', errorMessage(err));
+      } finally {
+        if (stream === controller) {
+          stream = null;
+          streamConnected = false;
+        }
+      }
+      if (!controller.signal.aborted && (await getActiveSession())) scheduleReconnect();
+    }
+
+    async function pollPending(session: ActiveSession): Promise<void> {
+      try {
+        const res = await api.pendingRestore(session.deviceId);
+        if (res.pending && res.request) await handleRestore(res.request);
+      } catch {
+        // The stream / next alarm will retry.
+      }
+    }
+
+    // ─── Restore handling ───────────────────────────────────────────────────────────────────────
+
+    async function handleRestore(request: PendingRestoreDetail): Promise<void> {
+      if (handledRequests.has(request.id)) return;
+      handledRequests.add(request.id);
+
+      const result = await executeRestore(request);
+      log(`restore ${request.id}: ${result.ok ? `opened ${result.count} tabs` : result.code}`);
+      try {
+        await api.completeRestore(
+          request.id,
+          result.ok ? { status: 'completed' } : { status: 'failed', error_code: result.code },
+        );
+      } catch (err) {
+        console.warn('[VaultTabs] could not report restore result:', errorMessage(err));
+      }
+      if (result.ok) broadcast({ type: 'RESTORE_COMPLETE', tabCount: result.count });
+    }
+
+    type RestoreResult = { ok: true; count: number } | { ok: false; code: RestoreErrorCode };
+
+    async function executeRestore(request: PendingRestoreDetail): Promise<RestoreResult> {
+      const session = await getActiveSession();
+      if (!session) return { ok: false, code: 'master_key_missing' };
+
+      try {
+        if (request.snapshot) {
+          const snap = request.snapshot;
+          let tabs: TabSnapshot[];
+          try {
+            tabs = await decryptSnapshot(snap.encrypted_blob, snap.iv, session.masterKey, snap.enc_version, {
+              userId: session.userId,
+              deviceId: snap.device_id,
+              capturedAt: snap.captured_at,
+            });
+          } catch {
+            return { ok: false, code: 'decrypt_failed' };
+          }
+          if (tabs.length === 0) return { ok: false, code: 'empty_snapshot' };
+          const count = await openSnapshotWindows(tabs);
+          return count > 0 ? { ok: true, count } : { ok: false, code: 'unsafe_url' };
+        }
+
+        if (request.encrypted_payload && request.payload_iv) {
+          let urls: string[];
+          try {
+            ({ urls } = await decryptRestorePayload(
+              request.encrypted_payload,
+              request.payload_iv,
+              session.masterKey,
+              {
+                userId: session.userId,
+                targetDeviceId: session.deviceId,
+              },
+            ));
+          } catch {
+            return { ok: false, code: 'decrypt_failed' };
+          }
+          // decryptRestorePayload drops non-http(s) URLs.
+          if (urls.length === 0) return { ok: false, code: 'unsafe_url' };
+          return { ok: true, count: await openUrlsInNewWindow(urls) };
+        }
+
+        return { ok: false, code: 'empty_snapshot' };
+      } catch (err) {
+        console.warn('[VaultTabs] opening restored tabs failed:', errorMessage(err));
+        return { ok: false, code: 'open_failed' };
+      }
+    }
+
+    // ─── Session lifecycle ──────────────────────────────────────────────────────────────────────
+
+    async function onSessionStarted(): Promise<void> {
+      handledRequests.clear();
+      restartStream();
+      await requestSync('login', true).catch(() => {});
+    }
+
+    function onSessionEnded(): void {
+      clearTimeout(debounceTimer);
+      stopStream();
+      handledRequests.clear();
+    }
+
+    // ─── Event wiring (registered synchronously so events wake the worker) ──────────────────────
+
+    // onActivated is ignored on purpose: switching tabs does not change what is synced.
+    browser.tabs.onCreated.addListener(markDirty);
+    browser.tabs.onRemoved.addListener(markDirty);
+    browser.tabs.onMoved.addListener(markDirty);
+    browser.tabs.onAttached.addListener(markDirty);
+    browser.tabs.onDetached.addListener(markDirty);
+    browser.windows.onCreated.addListener(markDirty);
+    browser.windows.onRemoved.addListener(markDirty);
+    browser.tabs.onUpdated.addListener((_id, change) => {
+      if (change.url !== undefined || change.title !== undefined || change.pinned !== undefined) markDirty();
+    });
+
+    browser.alarms.onAlarm.addListener(alarm => {
+      if (alarm.name === ALARM_FALLBACK) {
+        void requestSync('fallback').catch(() => {});
+        void heartbeat();
+        if (!streamConnected) {
+          void getActiveSession().then(s => s && pollPending(s));
+          void ensureStream();
+        }
+      } else if (alarm.name === ALARM_RECONNECT) {
+        void ensureStream();
+      }
+    });
+
+    const SETTINGS_KEYS: StateKey[] = ['excluded_domains', 'sync_paused'];
+    browser.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local') return;
+      if ('token' in changes) {
+        if (changes.token?.newValue) void onSessionStarted();
+        else onSessionEnded();
+        return;
+      }
+      if (SETTINGS_KEYS.some(k => k in changes)) markDirty();
+    });
+
+    browser.runtime.onMessage.addListener(
+      (message: unknown, sender, sendResponse: (r: SyncNowResponse) => void) => {
+        if (sender.id !== browser.runtime.id || !isPopupRequest(message)) return;
+        requestSync('manual', true)
+          .then(() => loadState())
+          .then(s => sendResponse(s.last_error ? { ok: false, error: s.last_error } : { ok: true }))
+          .catch(err => sendResponse({ ok: false, error: errorMessage(err, 'Sync failed.') }));
+        return true; // async response
+      },
+    );
+
+    void browser.alarms.get(ALARM_FALLBACK).then(existing => {
+      if (!existing) void browser.alarms.create(ALARM_FALLBACK, { periodInMinutes: FALLBACK_MINUTES });
+    });
+
+    // Worker (re)start: resume if a session exists.
+    void (async () => {
+      await migrateLegacyState();
+      if (!(await getActiveSession())) return;
+      void ensureStream();
+      await requestSync('startup').catch(() => {});
+    })();
+  },
 });

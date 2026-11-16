@@ -1,38 +1,60 @@
 # Dependencies
 node_modules/
 
-# Environment files — NEVER commit these
+# Environment files: NEVER commit these (only the *.example templates)
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!**/.env.example
 
-# TLS certificates / private keys (local mkcert certs must be generated per machine)
+# TLS certificates / private keys (generate them locally or let your reverse proxy handle TLS)
 *.pem
 *.key
+*.crt
 *.p12
 *.pfx
-!certs/.gitkeep
+certs/
 
 # Build outputs
 dist/
 .output/
 .wxt/
 .next/
+coverage/
+extension/.output/
 
 # TypeScript build info
 *.tsbuildinfo
 
+# Local databases / docker volumes used for tests or development
+.data/
+.pgdata/
+pgdata/
+postgres-data/
+*.sqlite
+*.sqlite3
+
 # Logs
 *.log
 npm-debug.log*
+logs/
 
 # OS files
 .DS_Store
 Thumbs.db
 
-# Editor
-.vscode/settings.json
+# Editors
+.vscode/*
+!.vscode/extensions.json
 .idea/
+*.swp
 
-# Extension zip files
+# Extension packages (built by CI / `npm run zip`)
 *.zip
+*.xpi
+*.crx
+
+# Misc
+.eslintcache
+.vercel/
+.turbo/

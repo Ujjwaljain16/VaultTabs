@@ -1,0 +1,128 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to (re)build and release, e.g. v1.0.0
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: 22
+  NPM_VERSION: 11
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  extension:
+    name: Extension packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # create the GitHub Release and upload assets
+    env:
+      # Configure under Settings → Secrets and variables → Actions (variables, or secrets of the same name).
+      VITE_API_URL: ${{ vars.VITE_API_URL || secrets.VITE_API_URL }}
+      VITE_DASHBOARD_URL: ${{ vars.VITE_DASHBOARD_URL || secrets.VITE_DASHBOARD_URL }}
+      VITE_FIREFOX_EXTENSION_ID: ${{ vars.VITE_FIREFOX_EXTENSION_ID || secrets.VITE_FIREFOX_EXTENSION_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - name: Check configuration
+        run: |
+          if [ -z "$VITE_API_URL" ]; then
+            echo "::error::Set the VITE_API_URL repository variable (or secret) to the production API URL."
+            exit 1
+          fi
+          case "$VITE_API_URL" in
+            https://*) ;;
+            *) echo "::error::VITE_API_URL must use https://"; exit 1 ;;
+          esac
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm install -g npm@${{ env.NPM_VERSION }}
+      - run: npm ci
+      - run: npm run build:shared
+      - name: Build Chrome package
+        run: npm run zip --workspace=extension
+      - name: Build Firefox package
+        run: npm run zip:firefox --workspace=extension
+      - name: Checksums
+        working-directory: extension/.output
+        run: sha256sum *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" extension/.output/*.zip extension/.output/SHA256SUMS.txt --clobber
+          else
+            prerelease=""
+            case "$TAG" in *-*) prerelease="--prerelease" ;; esac
+            gh release create "$TAG" extension/.output/*.zip extension/.output/SHA256SUMS.txt \
+              --title "VaultTabs $TAG" --generate-notes --verify-tag $prerelease \
+              --notes "Extension packages are built for API URL: $VITE_API_URL. Self-hosters should build their own (see docs/self-hosting.md). See CHANGELOG.md for details."
+          fi
+
+  images:
+    name: Container images (GHCR)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # Opt-in: set the repository variable PUBLISH_IMAGES=true to publish images to ghcr.io.
+    if: vars.PUBLISH_IMAGES == 'true'
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [backend, pwa]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Locate Dockerfile
+        id: dockerfile
+        run: echo "path=$(ls ${{ matrix.app }}/[Dd]ockerfile | head -n1)" >> "$GITHUB_OUTPUT"
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/vaulttabs-${{ matrix.app }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ env.TAG }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ env.TAG }}
+            type=raw,value=latest,enable=${{ !contains(env.TAG, '-') }}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ steps.dockerfile.outputs.path }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # The PWA image bakes in its API URL; published images use the PWA_API_URL variable
+          # (self-hosters normally build their own PWA image with their URL).
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.PWA_API_URL || vars.VITE_API_URL || 'http://localhost:3000/api/v1' }}
+          cache-from: type=gha,scope=release-${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.app }}

@@ -1,0 +1,57 @@
+/* Devices page */
+
+.list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card {
+  background: var(--black-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r);
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.info {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  margin-top: 3px;
+  line-height: 1.6;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.renameForm {
+  display: flex;
+  gap: 6px;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+}
+.renameForm input {
+  flex: 1 1 180px;
+}

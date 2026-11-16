@@ -1,224 +1,169 @@
-import { FastifyInstance } from 'fastify';
+import type { FastifyInstance } from 'fastify';
+import { RESTORE_ERROR_CODES, type PendingRestoreResponse, type RestoreErrorCode } from '@vaulttabs/shared';
 import { z } from 'zod';
-import { Container } from '../container.js';
-import { authenticate } from '../middleware/auth.js';
-import { isOriginAllowed } from '../middleware/cors.js';
+import { HttpError, parseOrThrow } from '../errors.js';
+import { uuid } from '../schemas.js';
+import { isBase64OfLength } from '../crypto/serverCrypto.js';
+import { idParam, type RouteDeps } from './common.js';
 
-const DeviceIdQuery = z.object({ device_id: z.string().uuid('device_id must be a valid UUID') });
-const RequestIdParam = z.object({ id: z.string().uuid('id must be a valid UUID') });
+/** Encrypted "send tab" payloads: up to LIMITS.maxRestoreUrls URLs, base64 ciphertext. */
+const MAX_PAYLOAD_CHARS = 1_000_000;
+const PING_INTERVAL_MS = 20_000;
+const MAX_STREAMS_PER_USER = 10;
 
-export async function restoreRoutes(fastify: FastifyInstance, options: { container: Container }) {
-  const { restoreService } = options.container;
-
-  fastify.post<{
-    Body: { target_device_id: string; snapshot_id?: string; target_url?: string }
-  }>('/restore', {
-    preHandler: [authenticate],
-  }, async (request, reply) => {
-    const { userId } = request.user;
-
-    const schema = z.object({
-      source_device_id: z.string().uuid().optional(),
-      target_device_id: z.string().uuid(),
-      snapshot_id: z.string().uuid().optional(),
-      // target_url is stored in PLAINTEXT on the server (see README "Security model").
-      // Only http(s) URLs are accepted.
-      target_url: z.string().url().max(2048).refine(u => /^https?:\/\//i.test(u), 'target_url must be http(s)').optional(),
-    });
-
-    const parsed = schema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() });
-    }
-
-    const { source_device_id, target_device_id, snapshot_id, target_url } = parsed.data;
-
-    try {
-      const req = await restoreService.createRequest(userId, target_device_id, snapshot_id, source_device_id, target_url);
-
-      return reply.status(201).send({
-        message: 'Restore request created',
-        request_id: req.id,
-        status: req.status,
-        expires_at: req.expires_at,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'failed';
-      return reply.status(400).send({ error: msg });
-    }
+const CreateBody = z
+  .object({
+    target_device_id: uuid,
+    snapshot_id: uuid.optional(),
+    encrypted_payload: z
+      .string()
+      .min(1)
+      .max(MAX_PAYLOAD_CHARS, `encrypted_payload must be at most ${MAX_PAYLOAD_CHARS} characters`)
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/, 'encrypted_payload must be base64')
+      .optional(),
+    payload_iv: z
+      .string()
+      .refine(v => isBase64OfLength(v, 12), 'payload_iv must be base64 of 12 bytes')
+      .optional(),
+  })
+  .refine(b => (b.encrypted_payload === undefined) === (b.payload_iv === undefined), {
+    message: 'encrypted_payload and payload_iv must be sent together',
+    path: ['encrypted_payload'],
+  })
+  .refine(b => (b.snapshot_id === undefined) !== (b.encrypted_payload === undefined), {
+    message: 'send exactly one of snapshot_id or encrypted_payload + payload_iv',
+    path: ['snapshot_id'],
   });
 
-  fastify.get<{
-    Querystring: { device_id: string }
-  }>('/restore/stream', {
-    preHandler: [authenticate],
-  }, async (request, reply) => {
-    const { userId } = request.user;
-    const parsedQuery = DeviceIdQuery.safeParse(request.query);
-    if (!parsedQuery.success) {
-      return reply.status(400).send({ error: 'device_id query param required (UUID)' });
-    }
-    const { device_id } = parsedQuery.data;
+const DeviceQuery = z.object({ device_id: uuid });
 
-    // Set headers for Server-Sent Events (SSE)
-    reply.raw.setHeader('Content-Type', 'text/event-stream');
-    reply.raw.setHeader('Cache-Control', 'no-cache');
-    reply.raw.setHeader('Connection', 'keep-alive');
-    // reply.raw bypasses the CORS plugin, so echo the origin only if it is on the allow-list
-    // (never "*"). Requests without an Origin header (the extension) need no CORS headers.
-    const origin = request.headers.origin;
-    if (origin && isOriginAllowed(origin)) {
-      reply.raw.setHeader('Access-Control-Allow-Origin', origin);
-      reply.raw.setHeader('Vary', 'Origin');
-    }
-    reply.raw.flushHeaders();
+const CompleteBody = z.object({
+  status: z.enum(['completed', 'failed'], { error: "status must be 'completed' or 'failed'" }),
+  // Unknown codes (newer/older clients) are stored as 'unknown'; free text is never stored.
+  error_code: z.string().max(64).optional(),
+});
 
-    // Initial Check
-    try {
-      const initialPending = await restoreService.getPendingWithSnapshot(userId, device_id);
-      if (initialPending) {
-        const payload = {
-          pending: true,
-          request: {
-            id: initialPending.id,
-            snapshot_id: initialPending.snapshot_id,
-            snapshot_iv: initialPending.snapshot_iv,
-            encrypted_blob: initialPending.encrypted_blob,
-            target_url: initialPending.target_url,
-            created_at: initialPending.created_at,
-            expires_at: initialPending.expires_at,
-          }
-        };
-        reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+function toErrorCode(code: string | undefined): RestoreErrorCode | null {
+  if (code === undefined) return null;
+  return (RESTORE_ERROR_CODES as readonly string[]).includes(code) ? (code as RestoreErrorCode) : 'unknown';
+}
+
+export async function restoreRoutes(
+  fastify: FastifyInstance,
+  { container, authenticate, isOriginAllowed }: RouteDeps,
+) {
+  const { restoreService, deviceService, restoreNotifier } = container;
+
+  const streamsPerUser = new Map<string, number>();
+  const openStreams = new Set<() => void>();
+  // End open SSE responses on shutdown so server.close() does not wait for them.
+  fastify.addHook('preClose', async () => {
+    for (const close of [...openStreams]) close();
+  });
+
+  fastify.post(
+    '/restore',
+    { preHandler: authenticate, bodyLimit: MAX_PAYLOAD_CHARS + 16 * 1024 },
+    async (request, reply) => {
+      const body = parseOrThrow(CreateBody, request.body);
+      const content =
+        body.snapshot_id !== undefined
+          ? { snapshotId: body.snapshot_id.toLowerCase() }
+          : { encryptedPayload: body.encrypted_payload!, payloadIv: body.payload_iv! };
+      const result = await restoreService.create(
+        request.user.userId,
+        body.target_device_id.toLowerCase(),
+        content,
+      );
+      return reply.status(201).send(result);
+    },
+  );
+
+  fastify.get('/restore/pending', { preHandler: authenticate }, async request => {
+    const { device_id } = parseOrThrow(DeviceQuery, request.query);
+    return restoreService.pending(request.user.userId, device_id.toLowerCase());
+  });
+
+  fastify.get(
+    '/restore/stream',
+    { preHandler: authenticate, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      const { userId } = request.user;
+      const deviceId = parseOrThrow(DeviceQuery, request.query).device_id.toLowerCase();
+      await deviceService.assertOwned(userId, deviceId);
+
+      const open = streamsPerUser.get(userId) ?? 0;
+      if (open >= MAX_STREAMS_PER_USER) {
+        throw new HttpError(429, 'Too many open restore streams for this account.', 'too_many_streams');
       }
-    } catch (err) {
-      request.log.error(err, '[SSE Initialize Error]');
-      reply.raw.end();
-      return;
-    }
+      const initial = await restoreService.pendingUnchecked(userId, deviceId);
 
-    // Heartbeat
-    const interval = setInterval(() => {
-      reply.raw.write(': heartbeat\n\n'); // SSE comment
-    }, 20000);
-
-    const eventName = `restore:${device_id}`;
-    const onRestoreRequest = async (req: any) => {
-      try {
-        const pending = await restoreService.getPendingWithSnapshot(userId, device_id);
-        if (pending && pending.id === req.id) {
-          const payload = {
-            pending: true,
-            request: {
-              id: pending.id,
-              snapshot_id: pending.snapshot_id,
-              snapshot_iv: pending.snapshot_iv,
-              encrypted_blob: pending.encrypted_blob,
-              target_url: pending.target_url,
-              created_at: pending.created_at,
-              expires_at: pending.expires_at,
-            }
-          };
-          reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
-        }
-      } catch (err) {
-        request.log.error(err, '[SSE Event Handler Error]');
+      streamsPerUser.set(userId, open + 1);
+      reply.hijack();
+      const res = reply.raw;
+      const headers: Record<string, string> = {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+        'X-Content-Type-Options': 'nosniff',
+      };
+      // The hijacked response bypasses @fastify/cors: echo the origin only if it is allowed.
+      const origin = request.headers.origin;
+      if (origin && isOriginAllowed(origin)) {
+        headers['Access-Control-Allow-Origin'] = origin;
+        headers['Vary'] = 'Origin';
       }
-    };
+      res.writeHead(200, headers);
 
-    restoreService.events.on(eventName, onRestoreRequest);
+      let closed = false;
+      const send = (event: PendingRestoreResponse) => {
+        if (!closed) res.write(`data: ${JSON.stringify(event)}\n\n`);
+      };
 
-    request.raw.on('close', () => {
-      clearInterval(interval);
-      restoreService.events.off(eventName, onRestoreRequest);
-    });
+      const ping = setInterval(() => {
+        if (!closed) res.write(': ping\n\n');
+      }, PING_INTERVAL_MS);
 
-    return new Promise((resolve) => {
-      request.raw.on('close', () => resolve(undefined));
-    });
-  });
-
-  fastify.get<{
-    Querystring: { device_id: string }
-  }>('/restore/pending', {
-    preHandler: [authenticate],
-  }, async (request, reply) => {
-    const { userId } = request.user;
-    const parsedQuery = DeviceIdQuery.safeParse(request.query);
-    if (!parsedQuery.success) {
-      return reply.status(400).send({ error: 'device_id query param required (UUID)' });
-    }
-    const { device_id } = parsedQuery.data;
-
-    const pending = await restoreService.getPendingWithSnapshot(userId, device_id);
-
-    if (!pending) {
-      return reply.send({ pending: false });
-    }
-
-    return reply.send({
-      pending: true,
-      request: {
-        id: pending.id,
-        snapshot_id: pending.snapshot_id,
-        snapshot_iv: pending.snapshot_iv,
-        encrypted_blob: pending.encrypted_blob,
-        target_url: pending.target_url,
-        created_at: pending.created_at,
-        expires_at: pending.expires_at,
-      },
-    });
-  });
-
-  fastify.patch<{
-    Params: { id: string };
-    Body: { status: 'completed' | 'failed'; error_msg?: string };
-  }>('/restore/:id', {
-    preHandler: [authenticate],
-  }, async (request, reply) => {
-    const { userId } = request.user;
-    const { id } = request.params;
-
-    const schema = z.object({
-      status: z.enum(['completed', 'failed']),
-      error_msg: z.string().max(500).optional(),
-    });
-
-    const parsed = schema.safeParse(request.body);
-    if (!parsed.success || !RequestIdParam.safeParse(request.params).success) {
-      return reply.status(400).send({ error: 'Validation failed' });
-    }
-
-    const { status, error_msg } = parsed.data;
-
-    try {
-      await restoreService.completeRequest(userId, id, status, error_msg);
-      return reply.send({
-        message: `Restore request ${status}`,
-        request_id: id,
-        status,
+      const unsubscribe = restoreNotifier.subscribe(deviceId, requestId => {
+        restoreService
+          .pendingUnchecked(userId, deviceId)
+          .then(state => {
+            if (state.pending && state.request?.id === requestId) send(state);
+          })
+          .catch((err: unknown) => request.log.warn({ err }, 'restore stream: failed to load request'));
       });
-    } catch (err) {
-      return reply.status(404).send({ error: 'Request not found' });
-    }
+
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
+        clearInterval(ping);
+        unsubscribe();
+        openStreams.delete(close);
+        const remaining = (streamsPerUser.get(userId) ?? 1) - 1;
+        if (remaining > 0) streamsPerUser.set(userId, remaining);
+        else streamsPerUser.delete(userId);
+      };
+      const close = () => {
+        cleanup();
+        res.end();
+      };
+      openStreams.add(close);
+      res.on('close', cleanup);
+      res.on('error', cleanup);
+
+      send(initial);
+    },
+  );
+
+  fastify.patch('/restore/:id', { preHandler: authenticate }, async request => {
+    const id = idParam(request.params, 'Restore request');
+    const body = parseOrThrow(CompleteBody, request.body);
+    await restoreService.complete(request.user.userId, id, body.status, toErrorCode(body.error_code));
+    return { message: `Restore request marked ${body.status}.` };
   });
 
-  fastify.get<{ Params: { id: string } }>('/restore/:id', {
-    preHandler: [authenticate],
-  }, async (request, reply) => {
-    const { userId } = request.user;
-    const { id } = request.params;
-
-    if (!RequestIdParam.safeParse(request.params).success) {
-      return reply.status(404).send({ error: 'Restore request not found' });
-    }
-
-    try {
-      const req = await restoreService.getRequestStatus(userId, id);
-      return reply.send({ request: req });
-    } catch (err) {
-      return reply.status(404).send({ error: 'Restore request not found' });
-    }
-  });
-
+  fastify.get('/restore/:id', { preHandler: authenticate }, async request => ({
+    request: await restoreService.get(request.user.userId, idParam(request.params, 'Restore request')),
+  }));
 }

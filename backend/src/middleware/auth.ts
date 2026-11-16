@@ -1,26 +1,53 @@
-// JWT Authentication middleware
+// JWT authentication with server-side revocation.
+//
+// Tokens carry { sub: user id, tv: token_version }. Bumping users.token_version (password change,
+// recovery, "sign out everywhere") or deleting the user invalidates every token issued before.
 
-import { FastifyRequest, FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest, preHandlerAsyncHookHandler } from 'fastify';
+import '@fastify/jwt';
+import { HttpError } from '../errors.js';
+import type { UserRepository } from '../repositories/user.repository.js';
+import { isUuid } from '../schemas.js';
+import type { TokenClaims } from '../services/auth.service.js';
 
-declare module 'fastify' {
-  interface FastifyRequest {
-    user: {
-      userId: string;
-      email: string;
-    };
+export interface AuthUser {
+  userId: string;
+  email: string;
+}
+
+declare module '@fastify/jwt' {
+  interface FastifyJWT {
+    payload: TokenClaims;
+    user: AuthUser;
   }
 }
 
-export async function authenticate(
-  request: FastifyRequest,
-  reply: FastifyReply
-): Promise<void> {
-  try {
-    await request.jwtVerify();
-  } catch (error) {
-    reply.status(401).send({
-      error: 'Unauthorized',
-      message: 'You must be logged in to access this resource. Include your JWT token in the Authorization header.',
-    });
-  }
+const tokenInvalid = () =>
+  new HttpError(401, 'Your session has ended. Please log in again.', 'token_invalid');
+
+export function createAuthenticate(users: UserRepository): preHandlerAsyncHookHandler {
+  return async function authenticate(request: FastifyRequest, _reply: FastifyReply): Promise<void> {
+    const header = request.headers.authorization;
+    const match = header ? /^Bearer\s+(\S+)\s*$/i.exec(header) : null;
+    if (!match) {
+      throw new HttpError(
+        401,
+        'Authentication required: send Authorization: Bearer <token>.',
+        'unauthorized',
+      );
+    }
+
+    let claims: TokenClaims;
+    try {
+      claims = request.server.jwt.verify<TokenClaims>(match[1]!);
+    } catch {
+      throw tokenInvalid();
+    }
+    if (!isUuid(claims.sub) || !Number.isInteger(claims.tv)) throw tokenInvalid();
+
+    const state = await users.findTokenState(claims.sub);
+    if (!state || state.token_version !== claims.tv) throw tokenInvalid();
+
+    request.user = { userId: claims.sub, email: state.email };
+  };
 }
