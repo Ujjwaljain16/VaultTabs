@@ -849,10 +849,42 @@ function renderDeviceCard(device: RemoteDevice, tabs: TabSnapshot[], searching: 
     if (n === 0) toast('Nothing to open.', true);
   });
 
+  // Remove a stale/duplicate device (and its snapshots). Two clicks to confirm.
+  const remove = h('button', {
+    className: 'btn-chip btn-chip-danger',
+    text: '✕',
+    type: 'button',
+    title: 'Remove this device and its snapshots',
+  });
+  let armed: ReturnType<typeof setTimeout> | undefined;
+  remove.addEventListener('click', async () => {
+    if (!armed) {
+      remove.textContent = 'Remove?';
+      armed = setTimeout(() => {
+        armed = undefined;
+        remove.textContent = '✕';
+      }, 4000);
+      return;
+    }
+    clearTimeout(armed);
+    remove.disabled = true;
+    try {
+      await api.deleteDevice(device.deviceId);
+      remoteDevices = remoteDevices.filter(d => d.deviceId !== device.deviceId);
+      renderOtherDevices();
+      toast(`Removed ${device.name}.`);
+    } catch (err) {
+      remove.disabled = false;
+      remove.textContent = '✕';
+      armed = undefined;
+      toast(errorMessage(err, 'Could not remove the device.'), true);
+    }
+  });
+
   const card = h(
     'div',
     { className: `device-card${isOpen ? ' open' : ''}` },
-    h('div', { className: 'device-head-row' }, head, openAll),
+    h('div', { className: 'device-head-row' }, head, openAll, remove),
   );
   head.addEventListener('click', () => {
     if (expanded.has(device.deviceId)) expanded.delete(device.deviceId);

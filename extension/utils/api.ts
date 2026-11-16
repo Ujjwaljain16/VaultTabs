@@ -148,6 +148,7 @@ export const api = {
   devices: (token?: string) => request<DevicesResponse>('/devices', { auth: token ?? true }),
   heartbeat: (deviceId: string) =>
     request<unknown>(`/devices/${enc(deviceId)}/heartbeat`, { method: 'PATCH', body: {} }),
+  deleteDevice: (deviceId: string) => request<unknown>(`/devices/${enc(deviceId)}`, { method: 'DELETE' }),
   renameDevice: (deviceId: string, deviceName: string) =>
     request<DeviceResponse>(`/account/devices/${enc(deviceId)}`, {
       method: 'PATCH',

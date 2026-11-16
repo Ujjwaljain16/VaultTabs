@@ -1390,3 +1390,9 @@ input[type='search'] {
   background: var(--error);
   box-shadow: 0 10px 25px rgba(255, 94, 94, 0.3);
 }
+
+.btn-chip-danger:hover:not(:disabled) {
+  border-color: var(--error);
+  color: var(--error);
+  background: var(--error-dim);
+}

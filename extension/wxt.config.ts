@@ -70,6 +70,15 @@ function buildCsp(apiOrigin: string, isDev: boolean): string {
   ].join('; ');
 }
 
+/**
+ * Public key that pins the Chrome extension ID (pgajemmicfcgngenjflggimgkfedcknp) for every build,
+ * including unpacked installs from any folder. A stable ID keeps chrome.storage.sync (and with it
+ * this browser's device id) across reinstalls, so a reinstall never shows up as a new device.
+ * Not a secret. Forks/self-hosters can set VITE_CHROME_EXTENSION_KEY to use their own ID.
+ */
+const DEFAULT_CHROME_KEY =
+  'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArNQMVKpCug1vi4WV2dhvPPA+pNKp1Ol1x00RD5s9/fEqiLbkQC04uTQID+vjiFfiDz8krw4bwdFO5yYdeJ4TZ7GQ0zWxQ73kSsxI6jBqoJ7iwHFfCqLa1H85llqO8Xu9UnxMRRijcCI7wgRUCsjCIF31x8mFkdOD/rJRG33b46XQgqmoY9AklYMjO6zE2U/oGmvp04EIDYRoU7/p14sZCj8u3rDdDd5UHxBdQrWtCyzq5a/W55+wCa3WwJi0mfcBPxXzgmA/IpQcnHJxeaqmF8fArbUUlMADApmzb/kXzgGmIe/c0ftZseal0Mc8v37bOjKgiQabq5nr2evh6s9uLwIDAQAB';
+
 const icons = { 16: 'icon-16.png', 32: 'icon-32.png', 48: 'icon-48.png', 128: 'icon-128.png' };
 
 export default defineConfig({
@@ -93,6 +102,10 @@ export default defineConfig({
       action: { default_title: 'VaultTabs', default_icon: icons },
       content_security_policy: { extension_pages: buildCsp(apiOrigin, isDev) },
     };
+
+    if (env.browser !== 'firefox') {
+      manifest.key = process.env.VITE_CHROME_EXTENSION_KEY?.trim() || DEFAULT_CHROME_KEY;
+    }
 
     if (env.browser === 'firefox') {
       manifest.browser_specific_settings = {
